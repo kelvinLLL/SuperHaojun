@@ -1,0 +1,23 @@
+{
+  "name": "superhaojun",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "SuperHaojun AI Harness — personal coding agent built on pi-ai + pi-agent-core",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "author": "haojunliu",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.64.0",
+    "@mariozechner/pi-ai": "^0.64.0",
+    "dotenv": "^17.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}
