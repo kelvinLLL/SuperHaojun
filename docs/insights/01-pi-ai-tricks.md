@@ -1,58 +1,54 @@
-# Insight 01: pi-ai Tricks & Gotchas
+# Insight 01: Python Migration Notes
 
 ## TLS Certificate Issue with Proxy Endpoints
-**Problem**: Node.js `fetch`/`undici` rejects self-signed or CDN-chained certificates that `curl` accepts.
-**Root cause**: `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` — the proxy's CA chain isn't in Node's built-in trust store.
-**Fix**: `process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"` before any network calls.
-**Note**: This is fine for personal proxy endpoints. For production, install the CA cert properly.
+**Problem**: Python `httpx`/`aiohttp` rejects self-signed or CDN-chained certificates.
+**Fix**: 自定义 `ssl.SSLContext` with `check_hostname=False, verify_mode=CERT_NONE`，传给 `httpx.AsyncClient(verify=ssl_ctx)`。
+比 Node.js 的 `NODE_TLS_REJECT_UNAUTHORIZED=0` 更精细 —— 只影响这一个 client。
 
-## OpenAI SDK Compat Flags Matter
-pi-ai's openai-completions provider auto-detects compat settings from `baseUrl` pattern matching (e.g., `openrouter.ai`, `api.z.ai`). For unknown proxy URLs, you need to manually set `compat`:
-```typescript
-compat: {
-  supportsStore: false,        // Many proxies don't support the `store` field
-  supportsDeveloperRole: true, // GPT-5.x / GPT-4o support developer role
-}
+## pydantic-settings 的 .env 读取行为
+**Gotcha**: `BaseSettings(env_file=".env")` 会从 CWD 读取 `.env` 文件，即使环境变量已通过 `monkeypatch.setenv` 设置。
+**测试解决方案**: `monkeypatch.chdir(tmp_path)` 切到空目录避免 `.env` 干扰。
+
+## openai SDK Streaming Pattern
+```python
+stream = await client.chat.completions.create(
+    model="gpt-5.4",
+    messages=[...],
+    stream=True,
+)
+async for chunk in stream:
+    delta = chunk.choices[0].delta
+    if delta.content:
+        print(delta.content, end="", flush=True)
 ```
-Without `supportsStore: false`, the SDK sends `"store": false` which some proxies reject.
+- `stream=True` 返回 `AsyncStream[ChatCompletionChunk]`
+- 每个 chunk.choices[0].delta 可能有 `content`、`tool_calls`、`role`
+- 第一个 chunk 通常只有 `role="assistant"`，无 content
 
-## pi-ai Provider Registration is Side-Effect Based
-```typescript
-import "@mariozechner/pi-ai/openai-completions"; // ← registers the provider
+## asyncio REPL Pattern
+```python
+async def repl():
+    loop = asyncio.get_event_loop()
+    while True:
+        user_input = await loop.run_in_executor(None, lambda: input("you> "))
+        async for chunk in agent.chat(user_input):
+            sys.stdout.write(chunk)
 ```
-This import MUST happen before any `streamSimple()` call, otherwise you get:
-`Error: No API provider registered for api: openai-completions`
+`input()` 是 blocking 的，`run_in_executor` 把它放到线程池，不阻塞 event loop。
 
-The registration happens at module load time via `registerApiProvider()`.
+## Agent 作为 AsyncIterator
+`Agent.chat()` 返回 `AsyncIterator[str]`（通过 `yield`）。
+调用者可以灵活消费：逐 chunk 打印、收集为字符串、传给其他处理器。
+这比 pi-mono 的 event subscription 模式更 Pythonic。
 
-## Agent.prompt() is Exclusive
-Only one `prompt()` can run at a time. Calling it while streaming throws:
-`"Agent is already processing a prompt. Use steer() or followUp() to queue messages"`
+## frozen dataclass + __post_init__
+```python
+@dataclass(frozen=True)
+class ModelConfig:
+    model_id: str
+    is_reasoning: bool = field(init=False)
 
-For steering during execution (e.g., tool interruption), use `agent.steer()`.
-
-## streamFn is Called per LLM Invocation
-The `streamFn` passed to Agent constructor is called on EVERY LLM call (not just once). This is important for:
-- Resolving short-lived OAuth tokens
-- Dynamic headers per request
-- Per-call API key rotation
-
-## Agent Event Protocol
-Event order for a simple text response:
+    def __post_init__(self):
+        object.__setattr__(self, "is_reasoning", bool(re.search(r"o[1-9]|gpt-5", self.model_id)))
 ```
-agent_start → turn_start → message_start → message_update* → message_end → turn_end → agent_end
-```
-
-For tool use:
-```
-agent_start → turn_start → message_start → message_update* (with toolcall_*) → message_end
-  → tool_execution_start → tool_execution_end → turn_end (with toolResults)
-  → turn_start → message_start → ... → agent_end
-```
-
-`message_update` carries `assistantMessageEvent` which is the raw stream event from pi-ai (text_delta, thinking_delta, toolcall_delta, etc.).
-
-## convertToLlm: The Message Filter
-`Agent.convertToLlm` converts `AgentMessage[]` → `Message[]`. Only three roles pass to LLM: `user`, `assistant`, `toolResult`. Custom messages (like `bashExecution`, `custom`, `branchSummary`) must be converted or filtered.
-
-Default implementation: `messages.filter(m => m.role === "user" || m.role === "assistant" || m.role === "toolResult")`
+frozen dataclass 的 `__post_init__` 需要用 `object.__setattr__` 绕过冻结限制。
