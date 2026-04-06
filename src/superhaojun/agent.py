@@ -14,6 +14,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from .bus import MessageBus
 from .compact.compactor import ContextCompactor
 from .config import ModelConfig, make_permissive_ssl_context
+from .hooks.runner import HookRunner
 from .messages import (
     AgentEnd, AgentStart, Error,
     PermissionRequest, TextDelta,
@@ -57,6 +58,7 @@ class Agent:
     permission_checker: PermissionChecker = field(default_factory=PermissionChecker)
     prompt_builder: SystemPromptBuilder | None = None
     compactor: ContextCompactor | None = None
+    hook_runner: HookRunner | None = None
     system_prompt: str = ""
     messages: list[ChatMessage] = field(default_factory=list)
     _client: AsyncOpenAI | None = field(default=None, repr=False)
@@ -235,10 +237,24 @@ class Agent:
             tool_call_id=tc.id, tool_name=tc.name, arguments=kwargs,
         ))
 
+        # Pre-hooks: if any fail, abort tool execution
+        if self.hook_runner:
+            pre_results = await self.hook_runner.run_pre_hooks(tc.name, kwargs)
+            if not self.hook_runner.all_passed(pre_results):
+                result = f"Blocked by pre-hook for tool '{tc.name}'"
+                await self.bus.emit(ToolCallEnd(
+                    tool_call_id=tc.id, tool_name=tc.name, result=result,
+                ))
+                return result
+
         try:
             result = await tool.execute(**kwargs)
         except Exception as exc:
             result = f"Error executing tool '{tc.name}': {exc}"
+
+        # Post-hooks: fire-and-forget
+        if self.hook_runner:
+            await self.hook_runner.run_post_hooks(tc.name, kwargs, result=result)
 
         await self.bus.emit(ToolCallEnd(
             tool_call_id=tc.id, tool_name=tc.name, result=result,

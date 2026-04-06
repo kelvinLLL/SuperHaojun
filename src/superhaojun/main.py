@@ -16,6 +16,8 @@ from .bus import MessageBus
 from .commands import CommandContext, CommandRegistry, register_builtin_commands
 from .config import load_config
 from .constants import BRAND_DIR
+from .hooks.config import HookConfig
+from .hooks.runner import HookRunner
 from .messages import (
     AgentEnd, AgentStart, Error,
     PermissionRequest, PermissionResponse,
@@ -160,13 +162,16 @@ def main() -> None:
     session_manager = SessionManager(storage_dir=brand_root / "sessions")
     memory_store = MemoryStore(storage_dir=brand_root / "memory")
 
+    hook_config = HookConfig.load(brand_root / "hooks.json")
+    hook_runner = HookRunner(config=hook_config, working_dir=working_dir) if hook_config.rules else None
+
     prompt_builder = SystemPromptBuilder(
         working_dir=working_dir,
         tool_summaries=tool_summaries,
         memory_text=memory_store.to_prompt_text(),
     )
 
-    agent = Agent(config=config, bus=bus, registry=tool_registry, prompt_builder=prompt_builder)
+    agent = Agent(config=config, bus=bus, registry=tool_registry, prompt_builder=prompt_builder, hook_runner=hook_runner)
     try:
         asyncio.run(repl(agent, cmd_registry, session_manager, memory_store))
     finally:
