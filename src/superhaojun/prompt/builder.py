@@ -1,36 +1,50 @@
-"""SystemPromptBuilder — dynamic system prompt assembly.
+"""SystemPromptBuilder v2 — Section Registry architecture.
 
-Assembles sections in order:
-1. Base instructions (identity, behavior)
-2. Environment context (working dir, git info)
-3. Project instructions (AGENT.md / CLAUDE.md / SUPERHAOJUN.md discovery)
-4. Tool descriptions
-5. Custom user instructions
+Assembles prompt from registered PromptSection instances:
+- Cacheable sections (identity, tools, project instructions, custom) come first
+- SYSTEM_PROMPT_DYNAMIC_BOUNDARY separates cacheable from uncacheable
+- Uncacheable sections (environment, memory, session context) come last
 
-Caches the built prompt; call invalidate() to force rebuild (e.g. on /clear, /compact).
+Caches the cacheable portion separately for prompt cache optimization.
 """
 
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+from ..constants import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+from .context import GitInfo, PromptContext, gather_git_info_sync
+from .sections import PromptSection
+from .sections.custom import CustomInstructionsSection
+from .sections.environment import EnvironmentSection
+from .sections.identity import IdentitySection
+from .sections.memory import MemorySection
+from .sections.project_instructions import ProjectInstructionsSection
+from .sections.session_context import SessionContextSection
+from .sections.tools import ToolsSection
 
 
-# Files to discover in working directory (and .claude/ subdir)
-_INSTRUCTION_FILES = ("AGENT.md", "CLAUDE.md", "SUPERHAOJUN.md")
-
-_BASE_PROMPT = (
-    "You are SuperHaojun, a highly capable AI coding assistant.\n"
-    "You help with programming tasks, code review, architecture design, and debugging.\n"
-    "Be concise and direct. Respond in the same language the user uses.\n"
-    "When writing code, follow clean code principles: clear naming, minimal comments, "
-    "idiomatic patterns for the language in use."
-)
+def _default_sections() -> list[PromptSection]:
+    """Default section registry — cacheable first, uncacheable last."""
+    return [
+        # Cacheable (stable across turns)
+        IdentitySection(),
+        ToolsSection(),
+        ProjectInstructionsSection(),
+        CustomInstructionsSection(),
+        # Uncacheable (may change every turn)
+        EnvironmentSection(),
+        MemorySection(),
+        SessionContextSection(),
+    ]
 
 
 class SystemPromptBuilder:
-    """Dynamically assembles system prompt from multiple sections."""
+    """Dynamically assembles system prompt from registered sections.
+
+    Compatible with v1 API: __init__ accepts the same kwargs,
+    build() returns a single string.
+    """
 
     def __init__(
         self,
@@ -38,111 +52,71 @@ class SystemPromptBuilder:
         tool_summaries: list[dict[str, str]] | None = None,
         custom_instructions: str = "",
         memory_text: str = "",
+        sections: list[PromptSection] | None = None,
     ) -> None:
         self._working_dir = working_dir
         self._tool_summaries = tool_summaries or []
         self._custom_instructions = custom_instructions
         self._memory_text = memory_text
-        self._cached: str | None = None
+        self._sections = sections if sections is not None else _default_sections()
+        self._cached_static: str | None = None
+        self._cached_full: str | None = None
+        self._session_summary: str = ""
+
+    @property
+    def context(self) -> PromptContext:
+        """Build the current PromptContext (used by sections)."""
+        git_info = gather_git_info_sync(self._working_dir)
+        return PromptContext(
+            working_dir=self._working_dir,
+            tool_summaries=self._tool_summaries,
+            memory_text=self._memory_text,
+            custom_instructions=self._custom_instructions,
+            git_info=git_info,
+            session_summary=self._session_summary,
+        )
+
+    def set_memory_text(self, text: str) -> None:
+        self._memory_text = text
+        self._cached_full = None  # dynamic part changed
+
+    def set_session_summary(self, summary: str) -> None:
+        self._session_summary = summary
+        self._cached_full = None
 
     def build(self) -> str:
-        if self._cached is not None:
-            return self._cached
-        sections: list[str] = []
-        sections.append(self._base_section())
-        sections.append(self._environment_section())
-        project = self._project_instructions_section()
-        if project:
-            sections.append(project)
-        tools = self._tools_section()
-        if tools:
-            sections.append(tools)
-        memory = self._memory_section()
-        if memory:
-            sections.append(memory)
-        custom = self._custom_section()
-        if custom:
-            sections.append(custom)
-        self._cached = "\n\n".join(sections)
-        return self._cached
+        """Build the complete system prompt."""
+        if self._cached_full is not None:
+            return self._cached_full
+
+        ctx = self.context
+
+        cacheable_parts: list[str] = []
+        uncacheable_parts: list[str] = []
+
+        for section in self._sections:
+            content = section.build(ctx)
+            if content is None:
+                continue
+            if section.cacheable:
+                cacheable_parts.append(content)
+            else:
+                uncacheable_parts.append(content)
+
+        parts = cacheable_parts[:]
+        if uncacheable_parts:
+            parts.append(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+            parts.extend(uncacheable_parts)
+
+        self._cached_full = "\n\n".join(parts)
+        return self._cached_full
 
     def invalidate(self) -> None:
-        self._cached = None
+        """Force rebuild on next build() call."""
+        self._cached_static = None
+        self._cached_full = None
 
-    # ── Private section builders ──
-
-    def _base_section(self) -> str:
-        return _BASE_PROMPT
-
-    def _environment_section(self) -> str:
-        parts = [f"Working directory: {self._working_dir}"]
-        git_info = self._gather_git_info()
-        if git_info:
-            parts.append(git_info)
-        return "\n".join(parts)
-
-    def _project_instructions_section(self) -> str | None:
-        contents: list[str] = []
-        root = Path(self._working_dir)
-
-        search_dirs = [root]
-        claude_dir = root / ".claude"
-        if claude_dir.is_dir():
-            search_dirs.append(claude_dir)
-
-        for dir_path in search_dirs:
-            for filename in _INSTRUCTION_FILES:
-                filepath = dir_path / filename
-                if filepath.is_file():
-                    text = filepath.read_text(encoding="utf-8").strip()
-                    if text:
-                        contents.append(f"# {filename}\n{text}")
-
-        if not contents:
-            return None
-        return "Project Instructions:\n\n" + "\n\n".join(contents)
-
-    def _tools_section(self) -> str | None:
-        if not self._tool_summaries:
-            return None
-        lines = ["Available Tools:"]
-        for ts in self._tool_summaries:
-            lines.append(f"- {ts['name']}: {ts.get('description', '')}")
-        return "\n".join(lines)
-
-    def _custom_section(self) -> str | None:
-        if not self._custom_instructions:
-            return None
-        return f"Custom Instructions:\n{self._custom_instructions}"
-
-    def _memory_section(self) -> str | None:
-        if not self._memory_text:
-            return None
-        return f"Memory:\n{self._memory_text}"
-
-    def _gather_git_info(self) -> str | None:
-        try:
-            branch = subprocess.run(
-                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, cwd=self._working_dir, timeout=5,
-            )
-            if branch.returncode != 0:
-                return None
-
-            branch_name = branch.stdout.strip()
-
-            status = subprocess.run(
-                ["git", "status", "--short"],
-                capture_output=True, text=True, cwd=self._working_dir, timeout=5,
-            )
-            status_text = status.stdout.strip()
-
-            parts = [f"Git branch: {branch_name}"]
-            if status_text:
-                # Truncate to 200 chars like Claude Code
-                if len(status_text) > 200:
-                    status_text = status_text[:200] + "..."
-                parts.append(f"Git status:\n{status_text}")
-            return "\n".join(parts)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            return None
+    def register_section(self, section: PromptSection) -> None:
+        """Add a section to the registry."""
+        self._sections.append(section)
+        self.invalidate()

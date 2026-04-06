@@ -15,6 +15,7 @@ from .agent import Agent
 from .bus import MessageBus
 from .commands import CommandContext, CommandRegistry, register_builtin_commands
 from .config import load_config
+from .constants import BRAND_DIR
 from .messages import (
     AgentEnd, AgentStart, Error,
     PermissionRequest, PermissionResponse,
@@ -155,11 +156,9 @@ def main() -> None:
         for t in tool_registry.to_openai_tools()
     ]
 
-    sessions_dir = Path(working_dir) / ".superhaojun" / "sessions"
-    session_manager = SessionManager(storage_dir=sessions_dir)
-
-    memory_dir = Path(working_dir) / ".superhaojun" / "memory"
-    memory_store = MemoryStore(storage_dir=memory_dir)
+    brand_root = Path(working_dir) / BRAND_DIR
+    session_manager = SessionManager(storage_dir=brand_root / "sessions")
+    memory_store = MemoryStore(storage_dir=brand_root / "memory")
 
     prompt_builder = SystemPromptBuilder(
         working_dir=working_dir,

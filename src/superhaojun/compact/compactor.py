@@ -1,17 +1,20 @@
-"""ContextCompactor — detects token threshold and compresses conversation.
+"""ContextCompactor v2 — sub-agent based compaction with circuit breaker.
 
-Strategy (inspired by Claude Code's services/compact/):
-1. estimate_tokens(): rough estimation (~4 chars per token)
-2. should_compact(): check if total context exceeds threshold fraction of max
-3. compact(): fork an LLM call (via summarize_fn) to produce summary,
-   replace old messages with summary + preserved recent messages
+Key improvements over v1:
+- Structured compaction prompt (7-section format from prompts.py)
+- Circuit breaker: cooldown between compactions to prevent infinite loops
+- Token output limit: compaction summary capped at max_tokens * 0.3
+- Sub-agent pattern: compaction uses separate LLM call (via summarize_fn)
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from .prompts import COMPACTION_USER_PROMPT
 
 if TYPE_CHECKING:
     from ..agent import ChatMessage
@@ -49,10 +52,9 @@ class CompactionResult:
     post_tokens: int
 
     def to_messages(self) -> list[ChatMessage]:
-        """Build replacement message list: summary boundary + preserved messages.
+        """Build replacement message list: summary boundary message.
 
-        Caller should have preserved messages stored separately.
-        This returns just the summary as a system message.
+        Caller appends preserved messages after this.
         """
         from ..agent import ChatMessage
         result: list[ChatMessage] = []
@@ -64,38 +66,58 @@ class CompactionResult:
         return result
 
 
-# Default no-op summarize function (real one calls LLM)
 async def _default_summarize(text: str) -> str:
+    """Default summarize: use structured prompt, truncate result."""
     return f"Previous conversation summary:\n{text[:500]}"
 
 
 @dataclass
 class ContextCompactor:
-    """Manages context compaction for a conversation.
+    """Manages context compaction with circuit breaker protection.
 
     Args:
         max_tokens: Model's context window size.
-        compact_threshold: Fraction of max_tokens that triggers compaction (default 0.8).
+        compact_threshold: Fraction of max_tokens that triggers compaction.
         preserve_recent: Number of recent messages to keep after compaction.
-        summarize_fn: Async callable that takes conversation text and returns summary.
+        summarize_fn: Async callable for LLM-based summarization.
+        cooldown_seconds: Minimum seconds between compactions (circuit breaker).
     """
     max_tokens: int = 200_000
     compact_threshold: float = 0.8
     preserve_recent: int = 4
     summarize_fn: Callable[[str], Awaitable[str]] = _default_summarize
+    cooldown_seconds: float = 30.0
+    _last_compact_time: float = field(default=0.0, repr=False)
 
     def should_compact(self, messages: list[ChatMessage]) -> bool:
         """Check if conversation exceeds compaction threshold."""
         token_count = _messages_token_count(messages)
         return token_count >= self.max_tokens * self.compact_threshold
 
+    @property
+    def is_on_cooldown(self) -> bool:
+        """True if circuit breaker is active (compacted too recently)."""
+        if self._last_compact_time == 0.0:
+            return False
+        return (time.monotonic() - self._last_compact_time) < self.cooldown_seconds
+
     async def compact(self, messages: list[ChatMessage]) -> CompactionResult:
-        """Compact the conversation: summarize old messages, preserve recent ones.
+        """Compact the conversation using structured prompt.
 
         Returns CompactionResult with summary and metadata.
         The caller is responsible for replacing agent.messages.
         """
         pre_tokens = _messages_token_count(messages)
+
+        # Circuit breaker check
+        if self.is_on_cooldown:
+            return CompactionResult(
+                summary="",
+                removed_count=0,
+                preserved_count=len(messages),
+                pre_tokens=pre_tokens,
+                post_tokens=pre_tokens,
+            )
 
         # Nothing to compact if messages fit within preserve window
         if len(messages) <= self.preserve_recent:
@@ -112,17 +134,26 @@ class ContextCompactor:
         old_messages = messages[:split_idx]
         preserved = messages[split_idx:]
 
-        # Build text for summarization
+        # Build structured prompt for summarization
         conversation_text = _messages_to_text(old_messages)
-        summary = await self.summarize_fn(conversation_text)
+        prompt_text = COMPACTION_USER_PROMPT.format(conversation=conversation_text)
 
-        # Calculate post-compaction tokens
-        summary_result = CompactionResult(
+        # Call summarize_fn (sub-agent LLM call in production)
+        summary = await self.summarize_fn(prompt_text)
+
+        # Enforce token output limit: max_tokens * 0.3
+        max_summary_tokens = int(self.max_tokens * 0.3)
+        max_summary_chars = max_summary_tokens * 4
+        if len(summary) > max_summary_chars:
+            summary = summary[:max_summary_chars] + "\n[truncated]"
+
+        # Update circuit breaker timestamp
+        object.__setattr__(self, '_last_compact_time', time.monotonic())
+
+        return CompactionResult(
             summary=summary,
             removed_count=len(old_messages),
             preserved_count=len(preserved),
             pre_tokens=pre_tokens,
             post_tokens=estimate_tokens(summary) + _messages_token_count(preserved),
         )
-
-        return summary_result

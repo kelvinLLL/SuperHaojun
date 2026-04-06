@@ -1,5 +1,5 @@
-"""Session package — conversation persistence."""
+"""Session package — JSONL-based conversation persistence."""
 
-from .manager import SessionInfo, SessionManager
+from .manager import SessionInfo, SessionManager, SessionWriter
 
-__all__ = ["SessionInfo", "SessionManager"]
+__all__ = ["SessionInfo", "SessionManager", "SessionWriter"]
