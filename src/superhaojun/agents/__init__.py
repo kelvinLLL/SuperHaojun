@@ -7,7 +7,11 @@ Patterns:
 """
 
 from .agent_tool import AgentTool
+from .commands import AgentsCommand
 from .coordinator import Coordinator, TaskSpec, TaskResult
-from .sub_agent import SubAgent
+from .sub_agent import SubAgent, SubAgentResult
 
-__all__ = ["AgentTool", "Coordinator", "SubAgent", "TaskResult", "TaskSpec"]
+__all__ = [
+    "AgentTool", "AgentsCommand", "Coordinator",
+    "SubAgent", "SubAgentResult", "TaskResult", "TaskSpec",
+]

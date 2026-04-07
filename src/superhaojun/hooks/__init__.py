@@ -1,6 +1,12 @@
-"""Hooks package — pre/post tool execution hooks, config-driven."""
+"""Hooks package — lifecycle event hooks with multi-source registry."""
 
-from .config import HookConfig, HookRule, HookTiming
+from .config import (
+    AggregatedHookResult, BLOCKING_EVENTS, HookContext, HookEvent,
+    HookRegistry, HookResult, HookRule, HookType,
+)
 from .runner import HookRunner
 
-__all__ = ["HookConfig", "HookRule", "HookRunner", "HookTiming"]
+__all__ = [
+    "AggregatedHookResult", "BLOCKING_EVENTS", "HookContext", "HookEvent",
+    "HookRegistry", "HookResult", "HookRule", "HookRunner", "HookType",
+]

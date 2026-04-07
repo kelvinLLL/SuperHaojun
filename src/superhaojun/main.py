@@ -16,7 +16,7 @@ from .bus import MessageBus
 from .commands import CommandContext, CommandRegistry, register_builtin_commands
 from .config import load_config
 from .constants import BRAND_DIR
-from .hooks.config import HookConfig
+from .hooks.config import HookRegistry
 from .hooks.runner import HookRunner
 from .messages import (
     AgentEnd, AgentStart, Error,
@@ -162,8 +162,8 @@ def main() -> None:
     session_manager = SessionManager(storage_dir=brand_root / "sessions")
     memory_store = MemoryStore(storage_dir=brand_root / "memory")
 
-    hook_config = HookConfig.load(brand_root / "hooks.json")
-    hook_runner = HookRunner(config=hook_config, working_dir=working_dir) if hook_config.rules else None
+    hook_registry = HookRegistry.load(brand_root / "hooks.json")
+    hook_runner = HookRunner(registry=hook_registry, working_dir=working_dir) if hook_registry.list_hooks() else None
 
     prompt_builder = SystemPromptBuilder(
         working_dir=working_dir,

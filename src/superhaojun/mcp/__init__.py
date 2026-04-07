@@ -6,6 +6,10 @@ and registers them into the shared ToolRegistry for unified scheduling.
 
 from .adapter import MCPToolAdapter
 from .client import MCPClient
-from .config import MCPServerConfig
+from .config import MCPServerConfig, MCPServerStatus, load_mcp_configs
+from .manager import MCPManager
 
-__all__ = ["MCPClient", "MCPServerConfig", "MCPToolAdapter"]
+__all__ = [
+    "MCPClient", "MCPManager", "MCPServerConfig", "MCPServerStatus",
+    "MCPToolAdapter", "load_mcp_configs",
+]

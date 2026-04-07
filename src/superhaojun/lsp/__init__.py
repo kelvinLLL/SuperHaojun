@@ -9,7 +9,13 @@ Connects to language servers to provide code intelligence:
 Context is injected into the prompt via LSPContextSection.
 """
 
-from .client import LSPClient
-from .service import LSPService
+from .client import Diagnostic, HoverInfo, LSPClient, Location
+from .diagnostics import DiagnosticRegistry, DiagnosticSource
+from .managed import LSPState, ManagedLSPClient
+from .service import LSPService, LSPServerConfig
 
-__all__ = ["LSPClient", "LSPService"]
+__all__ = [
+    "Diagnostic", "DiagnosticRegistry", "DiagnosticSource",
+    "HoverInfo", "LSPClient", "LSPServerConfig", "LSPService",
+    "LSPState", "Location", "ManagedLSPClient",
+]

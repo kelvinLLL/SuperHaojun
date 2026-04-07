@@ -80,4 +80,7 @@ class AgentTool(Tool):
             system_prompt=self._system_prompt,
             max_turns=self._max_turns,
         )
-        return await sub.run(task)
+        result = await sub.run(task)
+        if result.success:
+            return result.output
+        return f"SubAgent error: {result.error}\n{result.output}"

@@ -1,10 +1,11 @@
-"""HookRunner — executes shell hook commands before/after tool calls.
+"""Hook runner v2 — executes hooks with structured results and function hook support.
 
-Hooks run as subprocess commands with variable substitution.
-Pre-hooks can block tool execution (non-zero exit = abort).
-Post-hooks are fire-and-forget (failures logged, don't affect tool result).
-
-Reference: Claude Code's `utils/hooks/` with frontmatter-based hooks.
+v2 changes from v1:
+- Uses HookRegistry.match() instead of HookConfig.get_rules()
+- Supports both command and function hook types
+- Parses stdout JSON for additional_context / updated_input
+- Returns AggregatedHookResult with blocking semantics
+- Single run_hooks() entry point replaces run_pre_hooks/run_post_hooks
 """
 
 from __future__ import annotations
@@ -15,101 +16,58 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import HookConfig, HookRule, HookTiming
+from .config import (
+    AggregatedHookResult, BLOCKING_EVENTS, HookContext, HookEvent,
+    HookRegistry, HookResult, HookRule, HookType,
+)
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class HookResult:
-    """Result of a single hook execution."""
-    rule: HookRule
-    exit_code: int
-    stdout: str
-    stderr: str
-    timed_out: bool = False
-
-    @property
-    def success(self) -> bool:
-        return self.exit_code == 0 and not self.timed_out
-
-
 @dataclass
 class HookRunner:
-    """Executes hook commands for tool calls.
-
-    Usage:
-        runner = HookRunner(config)
-
-        # Pre-hooks: if any fail, tool should not execute
-        pre_results = await runner.run_pre_hooks("bash", {"command": "ls"})
-        if not runner.all_passed(pre_results):
-            return "Blocked by pre-hook"
-
-        # ... execute tool ...
-
-        # Post-hooks: fire-and-forget
-        await runner.run_post_hooks("bash", {"command": "ls"}, result="file1\\nfile2")
-    """
-    config: HookConfig
+    """Executes hooks matched by HookRegistry with structured result aggregation."""
+    registry: HookRegistry
     working_dir: str = "."
 
-    async def run_pre_hooks(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any],
-    ) -> list[HookResult]:
-        """Run all matching pre-hooks. Returns results for each."""
-        rules = self.config.get_rules(tool_name, HookTiming.PRE)
+    async def run_hooks(
+        self, event: HookEvent, tool_name: str = "",
+        arguments: dict[str, Any] | None = None,
+        result: str = "",
+        extra: dict[str, Any] | None = None,
+    ) -> AggregatedHookResult:
+        """Run all matching hooks for an event, return aggregated result."""
+        rules = self.registry.match(event, tool_name)
         if not rules:
-            return []
-        return await asyncio.gather(
-            *(self._execute(rule, tool_name, arguments) for rule in rules)
+            return AggregatedHookResult(results=[])
+
+        ctx = HookContext(
+            event=event,
+            tool_name=tool_name,
+            arguments=arguments or {},
+            result=result,
+            cwd=self.working_dir,
+            extra=extra or {},
         )
 
-    async def run_post_hooks(
-        self,
-        tool_name: str,
-        arguments: dict[str, Any],
-        result: str = "",
-    ) -> list[HookResult]:
-        """Run all matching post-hooks. Failures are logged but non-blocking."""
-        rules = self.config.get_rules(tool_name, HookTiming.POST)
-        if not rules:
-            return []
-        return await asyncio.gather(
-            *(self._execute(rule, tool_name, arguments, result) for rule in rules)
+        results = await asyncio.gather(
+            *(self._execute(rule, ctx) for rule in rules),
+            return_exceptions=False,
         )
+        return AggregatedHookResult(results=list(results))
 
-    @staticmethod
-    def all_passed(results: list[HookResult]) -> bool:
-        """Check if all hook results are successful."""
-        return all(r.success for r in results)
+    async def _execute(self, rule: HookRule, ctx: HookContext) -> HookResult:
+        """Execute a single hook rule."""
+        if rule.hook_type == HookType.FUNCTION:
+            return await self._execute_function(rule, ctx)
+        return await self._execute_command(rule, ctx)
 
-    async def _execute(
-        self,
-        rule: HookRule,
-        tool_name: str,
-        arguments: dict[str, Any],
-        result: str = "",
-    ) -> HookResult:
-        """Execute a single hook command with variable substitution."""
-        # Substitute placeholders
-        args_str = json.dumps(arguments, ensure_ascii=False)
-        try:
-            command = rule.command.format(
-                tool_name=tool_name,
-                arguments=args_str,
-                result=result,
-                cwd=self.working_dir,
-            )
-        except (KeyError, IndexError, ValueError):
-            # If template has unknown placeholders, run as-is
-            command = rule.command
-
+    async def _execute_command(self, rule: HookRule, ctx: HookContext) -> HookResult:
+        """Execute a shell command hook with variable substitution."""
+        cmd = self._substitute(rule.command, ctx)
         try:
             proc = await asyncio.create_subprocess_shell(
-                command,
+                cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.working_dir,
@@ -117,23 +75,98 @@ class HookRunner:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=rule.timeout,
             )
+            stdout = stdout_bytes.decode(errors="replace")
+            stderr = stderr_bytes.decode(errors="replace")
+            exit_code = proc.returncode or 0
+            additional_context, updated_input = self._parse_stdout_json(stdout)
+
             return HookResult(
                 rule=rule,
-                exit_code=proc.returncode or 0,
-                stdout=stdout_bytes.decode("utf-8", errors="replace").strip(),
-                stderr=stderr_bytes.decode("utf-8", errors="replace").strip(),
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr,
+                additional_context=additional_context,
+                updated_input=updated_input,
             )
         except asyncio.TimeoutError:
             try:
-                proc.kill()  # type: ignore[union-attr]
+                proc.kill()
             except ProcessLookupError:
                 pass
-            logger.warning("Hook timed out after %ds: %s", rule.timeout, command)
             return HookResult(
-                rule=rule, exit_code=-1, stdout="", stderr="Timed out", timed_out=True,
+                rule=rule, exit_code=1, stdout="", stderr="Hook timed out",
+                timed_out=True,
+            )
+        except OSError as exc:
+            return HookResult(
+                rule=rule, exit_code=1, stdout="", stderr=str(exc),
+            )
+
+    async def _execute_function(self, rule: HookRule, ctx: HookContext) -> HookResult:
+        """Execute a Python function hook."""
+        if rule.callback is None:
+            return HookResult(
+                rule=rule, exit_code=1, stdout="", stderr="No callback provided",
+            )
+        try:
+            result = await asyncio.wait_for(
+                rule.callback(ctx), timeout=rule.timeout,
+            )
+            # Function hooks can return a dict with structured fields
+            if isinstance(result, dict):
+                return HookResult(
+                    rule=rule,
+                    exit_code=result.get("exit_code", 0),
+                    stdout=result.get("stdout", ""),
+                    stderr=result.get("stderr", ""),
+                    additional_context=result.get("additional_context", ""),
+                    updated_input=result.get("updated_input"),
+                )
+            return HookResult(
+                rule=rule, exit_code=0, stdout=str(result) if result else "",
+                stderr="",
+            )
+        except asyncio.TimeoutError:
+            return HookResult(
+                rule=rule, exit_code=1, stdout="", stderr="Function hook timed out",
+                timed_out=True,
             )
         except Exception as exc:
-            logger.warning("Hook execution failed: %s — %s", command, exc)
             return HookResult(
-                rule=rule, exit_code=-1, stdout="", stderr=str(exc),
+                rule=rule, exit_code=1, stdout="", stderr=str(exc),
             )
+
+    @staticmethod
+    def _substitute(template: str, ctx: HookContext) -> str:
+        """Variable substitution for shell command templates."""
+        result = template
+        result = result.replace("$TOOL_NAME", ctx.tool_name)
+        result = result.replace("$EVENT", ctx.event.value)
+        result = result.replace("$CWD", ctx.cwd)
+        result = result.replace("$RESULT", ctx.result)
+        if ctx.arguments:
+            result = result.replace("$ARGUMENTS", json.dumps(ctx.arguments))
+        else:
+            result = result.replace("$ARGUMENTS", "{}")
+        return result
+
+    @staticmethod
+    def _parse_stdout_json(stdout: str) -> tuple[str, dict[str, Any] | None]:
+        """Parse stdout for structured JSON output.
+
+        Hooks can output JSON with:
+        - additional_context: string to append to agent context
+        - updated_input: dict to replace tool arguments
+        """
+        if not stdout.strip():
+            return "", None
+        try:
+            data = json.loads(stdout.strip())
+            if isinstance(data, dict):
+                return (
+                    data.get("additional_context", ""),
+                    data.get("updated_input"),
+                )
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return "", None

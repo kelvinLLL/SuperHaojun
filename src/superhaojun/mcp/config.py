@@ -1,46 +1,32 @@
-"""MCP server configuration — defines how to connect to MCP servers.
+"""MCP server configuration v2 — multi-scope config loading.
 
-Configuration is loaded from .haojun/mcp.json:
-```json
-{
-  "servers": [
-    {
-      "name": "filesystem",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "env": {}
-    },
-    {
-      "name": "web-search",
-      "transport": "sse",
-      "url": "http://localhost:3001/sse"
-    }
-  ]
-}
-```
+v2 changes:
+- Multi-scope: ~/.haojun/mcp.json (user) + .haojun/mcp.json (project)
+- Project scope overrides user scope (by name)
+- MCPServerConfig gains status tracking fields
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
+from typing import Any
+
+
+class MCPServerStatus(StrEnum):
+    """Runtime status of an MCP server connection."""
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
+    ERROR = "error"
+    DISABLED = "disabled"
 
 
 @dataclass(frozen=True)
 class MCPServerConfig:
-    """Configuration for a single MCP server connection.
-
-    Attributes:
-        name: Human-readable server identifier.
-        transport: Connection type — "stdio" or "sse".
-        command: For stdio transport, the command to spawn.
-        args: Command arguments for stdio transport.
-        env: Additional environment variables for the subprocess.
-        url: For SSE transport, the server URL.
-        enabled: Whether this server is active.
-    """
+    """Configuration for a single MCP server connection."""
     name: str
     transport: str = "stdio"
     command: str = ""
@@ -48,20 +34,17 @@ class MCPServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     url: str = ""
     enabled: bool = True
+    scope: str = "project"  # "user" or "project"
 
 
-def load_mcp_configs(path: Path) -> list[MCPServerConfig]:
-    """Load MCP server configurations from JSON file.
-
-    Returns empty list if file missing or invalid.
-    """
+def _load_scope(path: Path, scope: str) -> list[MCPServerConfig]:
+    """Load configs from a single scope file."""
     if not path.is_file():
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return []
-
     configs: list[MCPServerConfig] = []
     for item in data.get("servers", []):
         if not isinstance(item, dict) or "name" not in item:
@@ -74,5 +57,26 @@ def load_mcp_configs(path: Path) -> list[MCPServerConfig]:
             env=item.get("env", {}),
             url=item.get("url", ""),
             enabled=item.get("enabled", True),
+            scope=scope,
         ))
     return configs
+
+
+def load_mcp_configs(
+    project_path: Path | None = None,
+    user_path: Path | None = None,
+) -> list[MCPServerConfig]:
+    """Load and merge MCP configs from user + project scopes.
+
+    Project configs override user configs when names collide.
+    """
+    user_configs = _load_scope(user_path, "user") if user_path else []
+    project_configs = _load_scope(project_path, "project") if project_path else []
+
+    # Merge: project wins
+    by_name: dict[str, MCPServerConfig] = {}
+    for cfg in user_configs:
+        by_name[cfg.name] = cfg
+    for cfg in project_configs:
+        by_name[cfg.name] = cfg
+    return list(by_name.values())

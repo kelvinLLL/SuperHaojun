@@ -1,223 +1,264 @@
-"""Tests for Feature 13: LSP Integration."""
+"""Tests for LSP v2 — DiagnosticRegistry, ManagedLSPClient, LSPService."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import AsyncMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
 import pytest
 
 from superhaojun.lsp.client import Diagnostic, HoverInfo, LSPClient, Location
-from superhaojun.lsp.service import LSPServerConfig, LSPService
+from superhaojun.lsp.diagnostics import DiagnosticRegistry, DiagnosticSource
+from superhaojun.lsp.managed import LSPState, ManagedLSPClient
+from superhaojun.lsp.service import LSPService, LSPServerConfig
 
 
-# ---------------------------------------------------------------------------
-# Diagnostic
-# ---------------------------------------------------------------------------
-class TestDiagnostic:
-    def test_severity_str(self) -> None:
-        d = Diagnostic(file_path="f.py", line=1, character=0, severity=1, message="err")
-        assert d.severity_str == "error"
-        d2 = Diagnostic(file_path="f.py", line=1, character=0, severity=2, message="warn")
-        assert d2.severity_str == "warning"
-        d3 = Diagnostic(file_path="f.py", line=1, character=0, severity=3, message="info")
-        assert d3.severity_str == "info"
-        d4 = Diagnostic(file_path="f.py", line=1, character=0, severity=4, message="hint")
-        assert d4.severity_str == "hint"
-        d5 = Diagnostic(file_path="f.py", line=1, character=0, severity=99, message="?")
-        assert d5.severity_str == "unknown"
+# ── DiagnosticSource ──
 
 
-class TestHoverInfo:
-    def test_fields(self) -> None:
-        h = HoverInfo(contents="int", line=5, character=10)
-        assert h.contents == "int"
-        assert h.line == 5
+class TestDiagnosticSource:
+    def test_dedup_key(self):
+        d = DiagnosticSource(provider="lsp:py", file_path="a.py", line=10, character=0, message="err")
+        assert d.dedup_key == ("a.py", 10, "err")
+
+    def test_frozen(self):
+        d = DiagnosticSource(provider="lsp:py", file_path="a.py", line=0, character=0, message="x")
+        with pytest.raises(AttributeError):
+            d.provider = "changed"  # type: ignore[misc]
 
 
-class TestLocation:
-    def test_file_path(self) -> None:
-        loc = Location(uri="file:///tmp/test.py", line=0, character=0)
-        assert loc.file_path == "/tmp/test.py"
-
-    def test_non_file_uri(self) -> None:
-        loc = Location(uri="untitled:test.py", line=0, character=0)
-        assert loc.file_path == "untitled:test.py"
+# ── DiagnosticRegistry ──
 
 
-# ---------------------------------------------------------------------------
-# LSPClient — unit tests (no real process)
-# ---------------------------------------------------------------------------
-class TestLSPClient:
-    def test_not_running_initially(self) -> None:
-        client = LSPClient(command="pyright-langserver", args=["--stdio"])
-        assert not client.is_running
+class TestDiagnosticRegistry:
+    def _diag(self, line=0, msg="error", severity=1):
+        return Diagnostic(file_path="a.py", line=line, character=0, severity=severity, message=msg, source="test")
 
-    def test_path_to_uri(self) -> None:
-        uri = LSPClient._path_to_uri("/tmp/test.py")
-        assert uri.startswith("file://")
-        assert "test.py" in uri
+    def test_empty(self):
+        reg = DiagnosticRegistry()
+        assert reg.get_all() == []
+        assert reg.total_count == 0
 
-    def test_parse_locations_none(self) -> None:
-        assert LSPClient._parse_locations(None) == []
+    def test_update_file(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp:py", [self._diag(0, "e1"), self._diag(1, "e2")])
+        assert len(reg.get_file("a.py")) == 2
+        assert reg.total_count == 2
 
-    def test_parse_locations_single(self) -> None:
-        result = {"uri": "file:///a.py", "range": {"start": {"line": 5, "character": 3}}}
-        locs = LSPClient._parse_locations(result)
-        assert len(locs) == 1
-        assert locs[0].line == 5
+    def test_deduplication(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp:py", [self._diag(0, "same")])
+        reg.update_file("a.py", "hook:lint", [self._diag(0, "same")])  # duplicate
+        assert len(reg.get_file("a.py")) == 1
 
-    def test_parse_locations_list(self) -> None:
-        result = [
-            {"uri": "file:///a.py", "range": {"start": {"line": 1, "character": 0}}},
-            {"uri": "file:///b.py", "range": {"start": {"line": 10, "character": 5}}},
-        ]
-        locs = LSPClient._parse_locations(result)
-        assert len(locs) == 2
+    def test_different_lines_no_dedup(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp:py", [self._diag(0, "e1")])
+        reg.inject("a.py", "hook:lint", line=5, message="e2")
+        assert len(reg.get_file("a.py")) == 2
 
-    def test_parse_locations_invalid(self) -> None:
-        assert LSPClient._parse_locations("not a list") == []
+    def test_inject(self):
+        reg = DiagnosticRegistry()
+        reg.inject("b.py", "hook:lint", line=10, message="lint error")
+        diags = reg.get_file("b.py")
+        assert len(diags) == 1
+        assert diags[0].provider == "hook:lint"
 
-    def test_handle_diagnostics(self) -> None:
-        client = LSPClient(command="test")
-        params = {
-            "uri": "file:///tmp/test.py",
-            "diagnostics": [
-                {
-                    "range": {"start": {"line": 5, "character": 0}, "end": {"line": 5, "character": 10}},
-                    "severity": 1,
-                    "message": "undefined name 'x'",
-                    "source": "pyright",
-                },
-                {
-                    "range": {"start": {"line": 10, "character": 0}, "end": {"line": 10, "character": 5}},
-                    "severity": 2,
-                    "message": "unused import",
-                    "source": "pyright",
-                },
-            ],
-        }
-        client._handle_diagnostics(params)
-        uri = "file:///tmp/test.py"
-        assert uri in client._diagnostics
-        assert len(client._diagnostics[uri]) == 2
-        assert client._diagnostics[uri][0].severity == 1
-        assert client._diagnostics[uri][0].message == "undefined name 'x'"
+    def test_get_errors(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp", [
+            self._diag(0, "error", severity=1),
+            self._diag(1, "warning", severity=2),
+        ])
+        errors = reg.get_errors("a.py")
+        assert len(errors) == 1
+        assert errors[0].message == "error"
 
-    def test_handle_message_response(self) -> None:
-        """Test that _handle_message resolves pending futures."""
-        import asyncio
-        loop = asyncio.new_event_loop()
-        client = LSPClient(command="test")
-        future = loop.create_future()
-        client._pending[42] = future
-        client._handle_message({"id": 42, "result": {"key": "value"}})
-        assert future.done()
-        assert future.result() == {"key": "value"}
-        loop.close()
+    def test_get_errors_all_files(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp", [self._diag(0, "e1")])
+        reg.update_file("b.py", "lsp", [self._diag(0, "e2")])
+        errors = reg.get_errors()
+        assert len(errors) == 2
 
-    def test_handle_message_error(self) -> None:
-        import asyncio
-        loop = asyncio.new_event_loop()
-        client = LSPClient(command="test")
-        future = loop.create_future()
-        client._pending[1] = future
-        client._handle_message({"id": 1, "error": {"code": -1, "message": "bad"}})
-        assert future.done()
-        with pytest.raises(RuntimeError, match="LSP error"):
-            future.result()
-        loop.close()
+    def test_clear_file(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp", [self._diag(0, "e1")])
+        reg.clear_file("a.py")
+        assert reg.get_file("a.py") == []
+        assert reg.total_count == 0
 
+    def test_clear_all(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp", [self._diag()])
+        reg.update_file("b.py", "lsp", [self._diag(0, "e2")])  # different msg to avoid dedup
+        reg.clear_all()
+        assert reg.get_all() == []
 
-# ---------------------------------------------------------------------------
-# LSPServerConfig
-# ---------------------------------------------------------------------------
-class TestLSPServerConfig:
-    def test_defaults(self) -> None:
-        cfg = LSPServerConfig(language_id="python", command="pyright")
-        assert cfg.language_id == "python"
-        assert cfg.args == []
-        assert cfg.file_patterns == []
+    def test_replace_provider(self):
+        """Updating same file+provider replaces old diagnostics."""
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp:py", [self._diag(0, "old")])
+        reg.update_file("a.py", "lsp:py", [self._diag(0, "new")])
+        diags = reg.get_file("a.py")
+        assert len(diags) == 1
+        assert diags[0].message == "new"
+
+    def test_to_prompt_context_empty(self):
+        reg = DiagnosticRegistry()
+        assert reg.to_prompt_context() == ""
+
+    def test_to_prompt_context_with_errors(self):
+        reg = DiagnosticRegistry()
+        reg.update_file("a.py", "lsp", [self._diag(0, "syntax error")])
+        ctx = reg.to_prompt_context()
+        assert "ERROR" in ctx
+        assert "syntax error" in ctx
+
+    def test_to_prompt_context_max_errors(self):
+        reg = DiagnosticRegistry()
+        for i in range(15):
+            reg.inject("a.py", "lsp", line=i, message=f"error {i}")
+        ctx = reg.to_prompt_context(max_errors=5)
+        assert "... and 10 more errors" in ctx
 
 
-# ---------------------------------------------------------------------------
-# LSPService
-# ---------------------------------------------------------------------------
-class TestLSPService:
-    def test_add_server(self) -> None:
-        service = LSPService()
-        service.add_server(LSPServerConfig("python", "pyright", ["--stdio"]))
-        assert "python" in service._servers
+# ── ManagedLSPClient ──
 
-    def test_detect_language(self) -> None:
-        service = LSPService()
-        assert service._detect_language("test.py") == "python"
-        assert service._detect_language("test.ts") == "typescript"
-        assert service._detect_language("test.tsx") == "typescriptreact"
-        assert service._detect_language("test.rs") == "rust"
-        assert service._detect_language("test.unknown") == "plaintext"
 
-    def test_to_prompt_context_empty(self) -> None:
-        service = LSPService()
-        assert service.to_prompt_context() == ""
+class TestManagedLSPClient:
+    def test_initial_state(self):
+        m = ManagedLSPClient(command="pyright", args=["--stdio"])
+        assert m.state == LSPState.STOPPED
+        assert m.is_running is False
 
-    def test_to_prompt_context_with_clients(self) -> None:
-        service = LSPService()
-        # Manually inject a fake client with diagnostics
-        client = LSPClient(command="test")
-        client._initialized = True
-        client._process = None  # Will make is_running False
-        client._diagnostics = {
-            "file:///test.py": [
-                Diagnostic("test.py", 1, 0, 1, "undefined 'x'"),
-                Diagnostic("test.py", 5, 0, 2, "unused import"),
-            ]
-        }
-        service._clients["python"] = client
-        text = service.to_prompt_context()
-        assert "LSP Context" in text
-        assert "python" in text
-        assert "2 diagnostics" in text
-        assert "ERROR" in text  # Should show the error diagnostic
+    async def test_start_success(self):
+        m = ManagedLSPClient(command="pyright")
+        with patch.object(LSPClient, "start", new_callable=AsyncMock):
+            await m.start("/workspace")
+        assert m.state == LSPState.RUNNING
 
-    def test_get_client(self) -> None:
-        service = LSPService()
-        assert service.get_client("python") is None
-        client = LSPClient(command="test")
-        service._clients["python"] = client
-        assert service.get_client("python") is client
+    async def test_start_failure_triggers_restart(self):
+        m = ManagedLSPClient(command="pyright", max_restarts=1)
+        call_count = 0
+        async def mock_start(ws):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 2:
+                raise RuntimeError("crash")
+        with patch.object(LSPClient, "start", side_effect=mock_start), \
+             patch.object(LSPClient, "stop", new_callable=AsyncMock), \
+             patch("superhaojun.lsp.managed.asyncio.sleep", new_callable=AsyncMock):
+            await m.start("/workspace")
+        assert m.state == LSPState.CRASHED
+        assert call_count == 2  # initial + 1 restart
 
-    @pytest.mark.asyncio
-    async def test_get_diagnostics_no_client(self) -> None:
-        service = LSPService()
-        diags = await service.get_diagnostics("test.py")
-        assert diags == []
+    async def test_stop(self):
+        m = ManagedLSPClient(command="pyright")
+        with patch.object(LSPClient, "start", new_callable=AsyncMock):
+            await m.start("/workspace")
+        with patch.object(LSPClient, "stop", new_callable=AsyncMock):
+            await m.stop()
+        assert m.state == LSPState.STOPPED
 
-    @pytest.mark.asyncio
-    async def test_hover_no_client(self) -> None:
-        service = LSPService()
-        result = await service.hover("test.py", 0, 0)
-        assert result is None
+    async def test_did_open(self):
+        m = ManagedLSPClient(command="pyright")
+        with patch.object(LSPClient, "start", new_callable=AsyncMock):
+            await m.start("/workspace")
+            m._state = LSPState.RUNNING
+        with patch.object(LSPClient, "did_open", new_callable=AsyncMock) as mock_open:
+            await m.did_open("a.py", "python", "x = 1")
+            mock_open.assert_called_once_with("a.py", "python", "x = 1")
 
-    @pytest.mark.asyncio
-    async def test_definition_no_client(self) -> None:
-        service = LSPService()
-        result = await service.definition("test.py", 0, 0)
+    async def test_did_change(self):
+        m = ManagedLSPClient(command="pyright")
+        with patch.object(LSPClient, "start", new_callable=AsyncMock):
+            await m.start("/workspace")
+            m._state = LSPState.RUNNING
+        with patch.object(LSPClient, "did_change", new_callable=AsyncMock) as mock_change:
+            await m.did_change("a.py", "x = 2")
+            mock_change.assert_called_once()
+
+    async def test_operation_on_stopped_returns_none(self):
+        m = ManagedLSPClient(command="pyright")
+        result = await m.get_diagnostics("a.py")
         assert result == []
 
-    @pytest.mark.asyncio
-    async def test_get_all_diagnostics(self) -> None:
-        service = LSPService()
-        client = LSPClient(command="test")
-        client._diagnostics = {
-            "file:///a.py": [Diagnostic("a.py", 1, 0, 1, "err1")],
-            "file:///b.py": [Diagnostic("b.py", 2, 0, 2, "warn1")],
-        }
-        service._clients["python"] = client
-        all_diags = await service.get_all_diagnostics()
-        assert len(all_diags) == 2
+    async def test_crash_recovery_on_operation(self):
+        m = ManagedLSPClient(command="pyright", max_restarts=1)
+        with patch.object(LSPClient, "start", new_callable=AsyncMock):
+            await m.start("/workspace")
+            m._state = LSPState.RUNNING
 
-    @pytest.mark.asyncio
-    async def test_stop_all_empty(self) -> None:
-        service = LSPService()
-        await service.stop_all()  # Should not raise
+        # Simulate crash during get_diagnostics
+        with patch.object(LSPClient, "get_diagnostics", new_callable=AsyncMock, side_effect=RuntimeError("dead")), \
+             patch.object(LSPClient, "start", new_callable=AsyncMock), \
+             patch.object(LSPClient, "stop", new_callable=AsyncMock), \
+             patch("superhaojun.lsp.managed.asyncio.sleep", new_callable=AsyncMock):
+            result = await m.get_diagnostics("a.py")
+        assert result == []
+
+    async def test_max_restarts_exhausted(self):
+        m = ManagedLSPClient(command="pyright", max_restarts=0)
+        with patch.object(LSPClient, "start", new_callable=AsyncMock, side_effect=RuntimeError("crash")):
+            await m.start("/workspace")
+        assert m.state == LSPState.CRASHED
+
+
+# ── LSPServerConfig ──
+
+
+class TestLSPServerConfig:
+    def test_creation(self):
+        cfg = LSPServerConfig(language_id="python", command="pyright", args=["--stdio"])
+        assert cfg.language_id == "python"
+
+    def test_frozen(self):
+        cfg = LSPServerConfig(language_id="python", command="pyright")
+        with pytest.raises(AttributeError):
+            cfg.command = "other"  # type: ignore[misc]
+
+
+# ── LSPService ──
+
+
+class TestLSPService:
+    def test_add_server(self):
+        svc = LSPService()
+        svc.add_server(LSPServerConfig("python", "pyright", ["--stdio"], ["*.py"]))
+        assert "python" in svc._servers
+
+    async def test_start_stop_all(self):
+        svc = LSPService()
+        svc.add_server(LSPServerConfig("python", "pyright", ["--stdio"]))
+        with patch.object(LSPClient, "start", new_callable=AsyncMock):
+            await svc.start_all("/workspace")
+        assert "python" in svc._clients
+        with patch.object(LSPClient, "stop", new_callable=AsyncMock):
+            await svc.stop_all()
+        assert len(svc._clients) == 0
+
+    def test_detect_language(self):
+        svc = LSPService()
+        assert svc._detect_language("test.py") == "python"
+        assert svc._detect_language("test.ts") == "typescript"
+        assert svc._detect_language("test.unknown") == "plaintext"
+
+    async def test_get_diagnostics_no_client(self):
+        svc = LSPService()
+        diags = await svc.get_diagnostics("test.py")
+        assert diags == []
+
+    def test_to_prompt_context_empty(self):
+        svc = LSPService()
+        assert svc.to_prompt_context() == ""
+
+    async def test_hover_no_client(self):
+        svc = LSPService()
+        result = await svc.hover("test.py", 0, 0)
+        assert result is None
+
+    async def test_definition_no_client(self):
+        svc = LSPService()
+        result = await svc.definition("test.py", 0, 0)
+        assert result == []

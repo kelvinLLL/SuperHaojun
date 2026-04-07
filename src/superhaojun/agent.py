@@ -14,6 +14,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from .bus import MessageBus
 from .compact.compactor import ContextCompactor
 from .config import ModelConfig, make_permissive_ssl_context
+from .hooks.config import HookEvent
 from .hooks.runner import HookRunner
 from .messages import (
     AgentEnd, AgentStart, Error,
@@ -101,6 +102,17 @@ class Agent:
 
     async def handle_user_message(self, user_input: str) -> None:
         """Process a user message. Emits events via MessageBus."""
+        # Hook: USER_PROMPT_SUBMIT — can block or rewrite input
+        if self.hook_runner:
+            agg = await self.hook_runner.run_hooks(
+                HookEvent.USER_PROMPT_SUBMIT, arguments={"input": user_input},
+            )
+            if agg.should_block:
+                await self.bus.emit(Error(message=f"Blocked by hook: {'; '.join(agg.blocking_errors)}"))
+                return
+            if agg.updated_input and "input" in agg.updated_input:
+                user_input = agg.updated_input["input"]
+
         self.messages.append(ChatMessage(role="user", content=user_input))
         await self.bus.emit(AgentStart())
 
@@ -177,11 +189,27 @@ class Agent:
             self.messages.append(ChatMessage(role="assistant", content="".join(text_chunks)))
             break
 
+        # Hook: STOP — allows hooks to inspect/augment final response
+        if self.hook_runner:
+            final_text = self.messages[-1].content or ""
+            agg = await self.hook_runner.run_hooks(
+                HookEvent.STOP, result=final_text,
+            )
+            if agg.additional_contexts:
+                ctx_text = "\n".join(agg.additional_contexts)
+                self.messages.append(ChatMessage(role="system", content=f"[Hook context] {ctx_text}"))
+
         await self.bus.emit(AgentEnd())
 
         # Auto-compact if approaching token limit
         if self.compactor and self.compactor.should_compact(self.messages):
+            # Hook: PRE_COMPACT
+            if self.hook_runner:
+                await self.hook_runner.run_hooks(HookEvent.PRE_COMPACT)
             await self._auto_compact()
+            # Hook: POST_COMPACT
+            if self.hook_runner:
+                await self.hook_runner.run_hooks(HookEvent.POST_COMPACT)
 
     async def _execute_tool_calls(self, tool_calls: list[ToolCallInfo]) -> None:
         """Execute tool calls with concurrent/sequential strategy."""
@@ -237,24 +265,32 @@ class Agent:
             tool_call_id=tc.id, tool_name=tc.name, arguments=kwargs,
         ))
 
-        # Pre-hooks: if any fail, abort tool execution
+        # Hook: PRE_TOOL_USE — can block or rewrite arguments
         if self.hook_runner:
-            pre_results = await self.hook_runner.run_pre_hooks(tc.name, kwargs)
-            if not self.hook_runner.all_passed(pre_results):
-                result = f"Blocked by pre-hook for tool '{tc.name}'"
+            agg = await self.hook_runner.run_hooks(
+                HookEvent.PRE_TOOL_USE, tool_name=tc.name, arguments=kwargs,
+            )
+            if agg.should_block:
+                result = f"Blocked by hook for tool '{tc.name}': {'; '.join(agg.blocking_errors)}"
                 await self.bus.emit(ToolCallEnd(
                     tool_call_id=tc.id, tool_name=tc.name, result=result,
                 ))
                 return result
+            if agg.updated_input:
+                kwargs = agg.updated_input
 
         try:
             result = await tool.execute(**kwargs)
         except Exception as exc:
             result = f"Error executing tool '{tc.name}': {exc}"
 
-        # Post-hooks: fire-and-forget
+        # Hook: POST_TOOL_USE — can inject additional context
         if self.hook_runner:
-            await self.hook_runner.run_post_hooks(tc.name, kwargs, result=result)
+            agg = await self.hook_runner.run_hooks(
+                HookEvent.POST_TOOL_USE, tool_name=tc.name, arguments=kwargs, result=result,
+            )
+            if agg.additional_contexts:
+                result += "\n[Hook] " + "\n[Hook] ".join(agg.additional_contexts)
 
         await self.bus.emit(ToolCallEnd(
             tool_call_id=tc.id, tool_name=tc.name, result=result,
