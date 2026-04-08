@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessageData } from "@/types";
-import { Sparkles, Terminal, AlertTriangle, ChevronRight } from "lucide-react";
+import { Sparkles, Terminal, AlertCircle, ChevronRight, TerminalSquare } from "lucide-react";
 
 interface MessageCardProps {
   message: ChatMessageData;
@@ -107,36 +107,47 @@ export function MessageCard({ message }: MessageCardProps) {
         </div>
       )}
 
-      {/* ── System / command response (centered pill) ── */}
-      {isSystem && (
-        <div className="flex justify-center my-2">
-          <div
-            className="inline-flex items-start gap-2 rounded-xl px-4 py-2.5 max-w-[85%]"
-            style={{
-              background: "rgba(187, 154, 247, 0.06)",
-              border: "1px solid rgba(187, 154, 247, 0.12)",
-            }}
-          >
-            <AlertTriangle
-              size={12}
-              className="shrink-0 mt-0.5"
-              style={{ color: "var(--accent-magenta)" }}
-            />
-            <pre
-              className="text-xs font-mono whitespace-pre-wrap"
+      {/* ── System message: command output or error ── */}
+      {isSystem && (() => {
+        const isError = message.name === "error";
+        const isCommand = message.name === "command";
+        const accent = isError ? "var(--accent-red, #f7768e)" : "var(--accent-magenta)";
+        const bgAlpha = isError ? "rgba(247,118,142,0.06)" : "rgba(187,154,247,0.06)";
+        const borderAlpha = isError ? "rgba(247,118,142,0.15)" : "rgba(187,154,247,0.12)";
+        const Icon = isError ? AlertCircle : isCommand ? TerminalSquare : TerminalSquare;
+
+        return (
+          <div className="flex justify-center my-2">
+            <div
+              className="inline-flex items-start gap-2 rounded-xl px-4 py-2.5"
               style={{
-                color: "var(--text-secondary)",
-                background: "transparent",
-                border: "none",
-                padding: 0,
-                margin: 0,
+                background: bgAlpha,
+                border: `1px solid ${borderAlpha}`,
+                maxWidth: "min(90%, 640px)",
               }}
             >
-              {message.content}
-            </pre>
+              <Icon
+                size={13}
+                className="shrink-0 mt-0.5"
+                style={{ color: accent }}
+              />
+              <pre
+                className="text-xs font-mono whitespace-pre-wrap break-words"
+                style={{
+                  color: "var(--text-secondary)",
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  margin: 0,
+                  overflowX: "auto",
+                }}
+              >
+                {message.content}
+              </pre>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

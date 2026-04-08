@@ -39,6 +39,14 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Meta+Enter always sends, even when slash menu is open
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      setShowSlash(false);
+      handleSend();
+      return;
+    }
+
     if (showSlash && filteredCommands.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -60,11 +68,6 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         setShowSlash(false);
         return;
       }
-    }
-
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      handleSend();
     }
   };
 

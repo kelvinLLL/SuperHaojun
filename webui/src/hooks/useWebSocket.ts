@@ -107,6 +107,7 @@ export function useWebSocket() {
             {
               id: crypto.randomUUID(),
               role: "system" as const,
+              name: "command",
               content: `/${msg.command}\n${msg.output}`,
               timestamp: Date.now(),
             },
@@ -123,7 +124,8 @@ export function useWebSocket() {
             {
               id: crypto.randomUUID(),
               role: "system",
-              content: `Error: ${msg.message}`,
+              name: "error",
+              content: msg.message,
               timestamp: Date.now(),
             },
           ],

@@ -34,7 +34,7 @@ export function SlashMenu({ commands, filter, selectedIndex, onSelect }: SlashMe
         zIndex: 50,
       }}
     >
-      <div className="px-3 py-2 text-[10px] uppercase tracking-widest font-medium"
+      <div className="px-4 py-2 text-[10px] uppercase tracking-widest font-medium"
         style={{ color: "var(--text-dim)", borderBottom: "1px solid var(--border-subtle)" }}>
         Commands
       </div>
