@@ -344,6 +344,18 @@ class Agent:
         if self.prompt_builder:
             self.prompt_builder.invalidate()
 
+    def switch_model(self, new_config: ModelConfig) -> None:
+        """Switch to a different model config. Closes existing HTTP client."""
+        self.config = new_config
+        if self._client is not None:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._client.close())
+            except RuntimeError:
+                pass
+            self._client = None
+
     def reset(self) -> None:
         self.messages.clear()
 

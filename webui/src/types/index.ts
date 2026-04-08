@@ -82,6 +82,20 @@ export interface AppConfig {
   provider: string;
 }
 
+export interface ModelProfile {
+  key: string;
+  name: string;
+  model_id: string;
+  base_url: string;
+  provider: string;
+  active: boolean;
+}
+
+export interface CommandInfo {
+  name: string;
+  description: string;
+}
+
 /* WebSocket message types from server */
 export type WSMessage =
   | { type: "init"; tools: ToolInfo[]; messages: any[]; token_usage: TokenUsage }
@@ -93,5 +107,6 @@ export type WSMessage =
   | { type: "turn_end"; finish_reason: string; id: string }
   | { type: "agent_start"; id: string }
   | { type: "agent_end"; id: string }
+  | { type: "model_changed"; key: string; model_id: string; provider: string; base_url: string }
   | { type: "error"; message: string }
   | { type: "pong" };

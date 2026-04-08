@@ -1,0 +1,71 @@
+# SuperHaojun Model Profiles
+#
+# Two-level structure:
+#   providers: define API endpoints + credentials once
+#   models: define model profiles referencing a provider
+#
+# Switch models in the WebUI (Settings tab) without restarting.
+
+default: step-flash
+
+# ── Providers ────────────────────────────────────────────────────────────
+# Each provider defines a base_url + api_key.
+# api_key supports ${ENV_VAR} to read from .env or shell environment.
+
+providers:
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key: "${OPENROUTER_API_KEY}"
+
+  # openai:
+  #   base_url: "https://api.openai.com/v1"
+  #   api_key: "${OPENAI_API_KEY}"
+  #
+  # deepseek:
+  #   base_url: "https://api.deepseek.com/v1"
+  #   api_key: "${DEEPSEEK_API_KEY}"
+  #
+  # local:
+  #   base_url: "http://localhost:11434/v1"
+  #   api_key: "ollama"
+
+# ── Models ───────────────────────────────────────────────────────────────
+# Each model references a provider and specifies the model_id.
+
+models:
+  step-flash:
+    name: "Step 3.5 Flash (free)"
+    model_id: "stepfun/step-3.5-flash:free"
+    provider: openrouter
+
+  Minimax-M2.7:
+    name: "MiniMax: MiniMax M2.7"
+    model_id: "minimax/minimax-m2.7"
+    provider: openrouter
+
+  Gemmma4-31B-Free:
+    name: "Google: Gemma 4 31B (free)"
+    model_id: "google/gemma-4-31b-it:free"
+    provider: openrouter  
+    
+  # Add more models using the same or different providers:
+  #
+  # claude-sonnet:
+  #   name: "Claude Sonnet 4.5"
+  #   model_id: "anthropic/claude-sonnet-4-5"
+  #   provider: openrouter
+  #
+  # gpt4o:
+  #   name: "GPT-4o"
+  #   model_id: "openai/gpt-4o"
+  #   provider: openrouter
+  #
+  # deepseek-r1:
+  #   name: "DeepSeek R1"
+  #   model_id: "deepseek/deepseek-r1"
+  #   provider: openrouter
+  #
+  # llama-local:
+  #   name: "Llama 3 (local)"
+  #   model_id: "llama3"
+  #   provider: local

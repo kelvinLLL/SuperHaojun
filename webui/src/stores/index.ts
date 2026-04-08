@@ -9,6 +9,8 @@ import type {
   DiagnosticEntry,
   SubAgentHistoryEntry,
   AppConfig,
+  ModelProfile,
+  CommandInfo,
 } from "@/types";
 
 /* ── Chat Store ── */
@@ -136,6 +138,15 @@ interface PanelState {
   // Config
   config: AppConfig | null;
   setConfig: (config: AppConfig) => void;
+
+  // Models
+  models: ModelProfile[];
+  setModels: (models: ModelProfile[]) => void;
+  setActiveModel: (key: string, config: AppConfig) => void;
+
+  // Commands
+  commands: CommandInfo[];
+  setCommands: (cmds: CommandInfo[]) => void;
 }
 
 export const usePanelStore = create<PanelState>((set) => ({
@@ -160,4 +171,15 @@ export const usePanelStore = create<PanelState>((set) => ({
 
   config: null,
   setConfig: (config) => set({ config }),
+
+  models: [],
+  setModels: (models) => set({ models }),
+  setActiveModel: (key, config) =>
+    set((s) => ({
+      config,
+      models: s.models.map((m) => ({ ...m, active: m.key === key })),
+    })),
+
+  commands: [],
+  setCommands: (commands) => set({ commands }),
 }));

@@ -9,7 +9,8 @@ import uvicorn
 
 from ..agent import Agent
 from ..bus import MessageBus
-from ..config import load_config
+from ..commands import CommandRegistry, register_builtin_commands
+from ..config import load_model_registry
 from ..constants import BRAND_DIR
 from ..hooks.config import HookRegistry
 from ..hooks.runner import HookRunner
@@ -20,10 +21,15 @@ from .server import create_app
 
 
 def main() -> None:
-    config = load_config()
+    model_registry = load_model_registry()
+    config = model_registry.active
+
     bus = MessageBus()
     tool_registry = ToolRegistry()
     register_builtin_tools(tool_registry)
+
+    cmd_registry = CommandRegistry()
+    register_builtin_commands(cmd_registry)
 
     working_dir = os.getcwd()
     tool_summaries = [
@@ -51,8 +57,13 @@ def main() -> None:
     app = create_app(
         agent=agent, bus=bus,
         hook_registry=hook_registry,
+        model_registry=model_registry,
+        command_registry=cmd_registry,
     )
 
     port = int(os.environ.get("SUPERHAOJUN_PORT", "8765"))
+    active = model_registry.active
     print(f"🚀 SuperHaojun WebUI → http://localhost:{port}")
+    print(f"   Model: {active.model_id} @ {active.base_url}")
+    print(f"   Profiles: {', '.join(model_registry.profiles)}")
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")

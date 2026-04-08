@@ -205,6 +205,54 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
             "provider": cfg.provider,
         }
 
+    @app.get("/api/config/models")
+    async def get_models() -> list[dict[str, Any]]:
+        """List all model profiles with active flag."""
+        registry = getattr(app.state, "model_registry", None)
+        if registry is None:
+            cfg = state.agent.config
+            return [{
+                "key": "default",
+                "name": cfg.model_id,
+                "model_id": cfg.model_id,
+                "base_url": cfg.base_url,
+                "provider": cfg.provider,
+                "active": True,
+            }]
+        return registry.list_profiles()
+
+    @app.post("/api/config/models/{key}/activate")
+    async def activate_model(key: str) -> dict[str, Any]:
+        """Switch the active model profile."""
+        registry = getattr(app.state, "model_registry", None)
+        if registry is None:
+            return {"ok": False, "error": "No model registry available"}
+        try:
+            new_config = registry.switch(key)
+            state.agent.switch_model(new_config)
+            # Broadcast model change to all WS clients
+            await state.broadcast({
+                "type": "model_changed",
+                "key": key,
+                "model_id": new_config.model_id,
+                "provider": new_config.provider,
+                "base_url": new_config.base_url,
+            })
+            return {"ok": True, "active": key, "model_id": new_config.model_id}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+
+    @app.get("/api/commands")
+    async def get_commands() -> list[dict[str, str]]:
+        """List available slash commands for autocomplete."""
+        cmd_registry = getattr(app.state, "command_registry", None)
+        if cmd_registry is None:
+            return []
+        return [
+            {"name": cmd.name, "description": cmd.description}
+            for cmd in sorted(cmd_registry.all(), key=lambda c: c.name)
+        ]
+
     # Serve frontend static files (if built)
     if STATIC_DIR.exists():
         app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")

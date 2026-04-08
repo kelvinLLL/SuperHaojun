@@ -3,6 +3,7 @@ import {
   MessageSquare, List, Wrench, Users, Settings,
   PanelRightClose, PanelRightOpen,
 } from "lucide-react";
+import { ModelSelector } from "../chat/ModelSelector";
 
 const TABS = [
   { id: "chat", label: "Chat", icon: MessageSquare },
@@ -22,7 +23,7 @@ export function TabBar() {
     >
       <div className="flex items-center gap-1">
         {/* Logo */}
-        <div className="flex items-center gap-2 mr-6">
+        <div className="flex items-center gap-2 mr-4">
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-bold"
             style={{
@@ -34,12 +35,21 @@ export function TabBar() {
             S
           </div>
           <span
-            className="text-sm font-semibold tracking-tight"
+            className="text-sm font-semibold tracking-tight hidden lg:inline"
             style={{ color: "var(--text-primary)" }}
           >
             SuperHaojun
           </span>
         </div>
+
+        {/* Separator */}
+        <div className="w-px h-5 mx-1" style={{ background: "var(--border-subtle)" }} />
+
+        {/* Model Selector */}
+        <ModelSelector />
+
+        {/* Separator */}
+        <div className="w-px h-5 mx-1" style={{ background: "var(--border-subtle)" }} />
 
         {/* Tabs */}
         <nav className="flex items-center gap-0.5">

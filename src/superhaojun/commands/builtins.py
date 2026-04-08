@@ -92,13 +92,41 @@ class ModelCommand(Command):
 
     @property
     def description(self) -> str:
-        return "Show current model info"
+        return "Show/switch model (list | <key>)"
 
     async def execute(self, args: str, context: CommandContext) -> str | None:
         from ..agent import Agent
+        from ..config import ModelRegistry
+
         agent: Agent = context.agent  # type: ignore[assignment]
-        cfg = agent.config
-        return f"Model: {cfg.model_id} @ {cfg.base_url} (reasoning={cfg.is_reasoning})"
+        registry: ModelRegistry | None = getattr(context, "model_registry", None)
+        sub = args.strip()
+
+        # /model  → show current
+        if not sub:
+            cfg = agent.config
+            return f"Model: {cfg.model_id} @ {cfg.base_url} (reasoning={cfg.is_reasoning})"
+
+        # /model list  → show all profiles
+        if sub == "list":
+            if registry is None:
+                return "No model registry configured."
+            profiles = registry.list_profiles()
+            lines = ["Available models:"]
+            for p in profiles:
+                marker = " ← active" if p["active"] else ""
+                lines.append(f"  {p['key']:20s} {p['name']}{marker}")
+            return "\n".join(lines)
+
+        # /model <key>  → switch
+        if registry is None:
+            return "No model registry configured."
+        try:
+            new_config = registry.switch(sub)
+            agent.switch_model(new_config)
+            return f"Switched to: {new_config.model_id}"
+        except ValueError as exc:
+            return str(exc)
 
 
 class ToolsCommand(Command):

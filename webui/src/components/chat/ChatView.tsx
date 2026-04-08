@@ -1,11 +1,11 @@
 import { useRef, useEffect } from "react";
-import { useChatStore } from "@/stores";
+import { useChatStore, usePanelStore } from "@/stores";
 import { MessageCard } from "./MessageCard";
 import { ToolCallCard } from "./ToolCallCard";
 import { StreamingCard } from "./StreamingCard";
 import { ChatInput } from "./ChatInput";
 import { PermissionModal } from "../shared/PermissionModal";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Bot, Slash } from "lucide-react";
 
 interface ChatViewProps {
   onSend: (text: string) => void;
@@ -14,6 +14,7 @@ interface ChatViewProps {
 
 export function ChatView({ onSend, onPermission }: ChatViewProps) {
   const { messages, streamingText, isStreaming, toolCalls, permissionRequest } = useChatStore();
+  const models = usePanelStore((s) => s.models);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -21,6 +22,7 @@ export function ChatView({ onSend, onPermission }: ChatViewProps) {
   }, [messages, streamingText, toolCalls]);
 
   const isEmpty = messages.length === 0 && !isStreaming;
+  const activeModel = models.find((m) => m.active);
 
   return (
     <div className="flex flex-col h-full relative">
@@ -52,9 +54,22 @@ export function ChatView({ onSend, onPermission }: ChatViewProps) {
                   AI-powered coding assistant. Ask me anything about code,
                   architecture, debugging, or let me help build your project.
                 </p>
+                {activeModel && (
+                  <div
+                    className="inline-flex items-center gap-1.5 mt-3 px-3 py-1 rounded-full text-[11px]"
+                    style={{
+                      background: "var(--bg-elevated)",
+                      color: "var(--text-secondary)",
+                      border: "1px solid var(--border-subtle)",
+                    }}
+                  >
+                    <Bot size={11} style={{ color: "var(--accent-cyan)" }} />
+                    {activeModel.name}
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2 mt-2">
-                {["Explain this code", "Fix a bug", "Write tests"].map((text) => (
+              <div className="flex flex-wrap justify-center gap-2 mt-2">
+                {["Explain this code", "Fix a bug", "Write tests", "Refactor"].map((text) => (
                   <button
                     key={text}
                     onClick={() => onSend(text)}
@@ -68,6 +83,13 @@ export function ChatView({ onSend, onPermission }: ChatViewProps) {
                     {text}
                   </button>
                 ))}
+              </div>
+              <div
+                className="flex items-center gap-1.5 text-[11px] mt-1"
+                style={{ color: "var(--text-dim)" }}
+              >
+                <Slash size={10} />
+                Type / for commands
               </div>
             </div>
           )}

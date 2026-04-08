@@ -50,7 +50,9 @@ class TestModelConfig:
         with pytest.raises(AttributeError):
             cfg.provider = "other"  # type: ignore[misc]
 
-    def test_load_config_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_load_config_from_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+        # chdir to tmp_path so no models.yaml is found; falls back to .env
+        monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
         monkeypatch.setenv("OPENAI_BASE_URL", "https://example.com/v1")
         monkeypatch.setenv("MODEL_ID", "gpt-5.4")
@@ -67,18 +69,22 @@ class TestModelConfig:
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         monkeypatch.delenv("MODEL_ID", raising=False)
         monkeypatch.delenv("MODEL_PROVIDER", raising=False)
-        # Prevent pydantic-settings from reading .env file
+        # chdir to tmp_path: no models.yaml, falls back to env
         monkeypatch.chdir(tmp_path)
         cfg = load_config()
         assert cfg.base_url == "https://api.openai.com/v1"
         assert cfg.model_id == "gpt-4o"
         assert cfg.provider == "openai"
 
-    def test_load_config_missing_key(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    def test_load_config_missing_key_returns_empty(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: object
+    ) -> None:
+        # With models.yaml absent and no env key, load_config returns empty api_key
+        # (validation happens at API call time, not config load time)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.chdir(tmp_path)
-        with pytest.raises(Exception):
-            load_config()
+        cfg = load_config()
+        assert cfg.api_key == ""
 
 
 class TestSSL:

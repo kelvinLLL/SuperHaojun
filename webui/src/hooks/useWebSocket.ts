@@ -4,6 +4,20 @@ import type { WSMessage } from "@/types";
 
 let ws: WebSocket | null = null;
 
+function fetchModels() {
+  fetch("/api/config/models")
+    .then((r) => r.json())
+    .then((models) => usePanelStore.getState().setModels(models))
+    .catch(() => {});
+}
+
+function fetchCommands() {
+  fetch("/api/commands")
+    .then((r) => r.json())
+    .then((cmds) => usePanelStore.getState().setCommands(cmds))
+    .catch(() => {});
+}
+
 export function useWebSocket() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -16,6 +30,8 @@ export function useWebSocket() {
 
     ws.onopen = () => {
       console.log("[WS] Connected");
+      fetchModels();
+      fetchCommands();
     };
 
     ws.onmessage = (event) => {
@@ -71,6 +87,14 @@ export function useWebSocket() {
 
       case "agent_end":
         useChatStore.getState().endStreaming();
+        break;
+
+      case "model_changed":
+        usePanelStore.getState().setActiveModel(msg.key, {
+          model_id: msg.model_id,
+          provider: msg.provider,
+          base_url: msg.base_url,
+        });
         break;
 
       case "error":
