@@ -28,9 +28,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 class WebUIState:
     """Shared mutable state for the WebUI server."""
 
-    def __init__(self, agent: Agent, bus: MessageBus) -> None:
+    def __init__(self, agent: Agent, bus: MessageBus, **extras: Any) -> None:
         self.agent = agent
         self.bus = bus
+        self.extras = extras
         self.connections: list[WebSocket] = []
         self.hook_log: list[dict[str, Any]] = []
         self.agent_history: list[dict[str, Any]] = []
@@ -82,7 +83,7 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
         allow_headers=["*"],
     )
 
-    state = WebUIState(agent=agent, bus=bus)
+    state = WebUIState(agent=agent, bus=bus, **extras)
     app.state.ui = state
 
     # Store extras (mcp_manager, hook_registry, etc.)
@@ -267,7 +268,13 @@ async def _handle_ws_message(state: WebUIState, data: dict[str, Any]) -> None:
 
     if msg_type == "user_message":
         text = data.get("text", "").strip()
-        if text:
+        if not text:
+            return
+
+        # Intercept slash commands (like Claude Code's processSlashCommand)
+        if text.startswith("/"):
+            asyncio.create_task(_run_slash_command(state, text))
+        else:
             asyncio.create_task(_run_agent_message(state, text))
 
     elif msg_type == "permission_response":
@@ -284,14 +291,91 @@ async def _handle_ws_message(state: WebUIState, data: dict[str, Any]) -> None:
         await state.broadcast({"type": "pong"})
 
 
+async def _run_slash_command(state: WebUIState, text: str) -> None:
+    """Parse and execute a slash command, broadcasting the result."""
+    from ..commands.base import CommandContext
+
+    # Parse: "/model list" → name="model", args="list"
+    without_slash = text[1:]
+    parts = without_slash.split(None, 1)
+    cmd_name = parts[0] if parts else ""
+    cmd_args = parts[1] if len(parts) > 1 else ""
+
+    cmd_registry = state.extras.get("command_registry")
+    model_registry = state.extras.get("model_registry")
+
+    if cmd_registry is None:
+        await state.broadcast({
+            "type": "command_response",
+            "command": cmd_name,
+            "output": "No command registry available.",
+        })
+        return
+
+    command = cmd_registry.get(cmd_name)
+    if command is None:
+        available = [c.name for c in cmd_registry.all()]
+        output = f"Unknown command: /{cmd_name}\nAvailable: {', '.join('/' + n for n in sorted(available))}"
+        await state.broadcast({
+            "type": "command_response",
+            "command": cmd_name,
+            "output": output,
+        })
+        return
+
+    # Build CommandContext with all available extras
+    context = CommandContext(agent=state.agent)
+    for k, v in state.extras.items():
+        setattr(context, k, v)
+
+    try:
+        result = await command.execute(cmd_args, context)
+        output = result or f"/{cmd_name} executed."
+    except Exception as exc:
+        logger.error("Command /%s error: %s", cmd_name, exc)
+        output = f"Error executing /{cmd_name}: {exc}"
+
+    await state.broadcast({
+        "type": "command_response",
+        "command": cmd_name,
+        "output": output,
+    })
+
+    # If model command switched, also broadcast model_changed for UI sync
+    if cmd_name == "model" and cmd_args.strip() and cmd_args.strip() != "list":
+        if model_registry:
+            try:
+                profiles = model_registry.list_profiles()
+                for p in profiles:
+                    if p["active"]:
+                        await state.broadcast({
+                            "type": "model_changed",
+                            "key": p["key"],
+                            "model_id": p["model_id"],
+                            "provider": p["provider"],
+                            "base_url": p["base_url"],
+                        })
+                        break
+            except Exception:
+                pass
+
+
 async def _run_agent_message(state: WebUIState, text: str) -> None:
     try:
         await state.agent.handle_user_message(text)
     except Exception as exc:
         logger.error("Agent error: %s", exc)
+        # Extract user-friendly error from API error responses
+        error_msg = str(exc)
+        if "429" in error_msg:
+            error_msg = "Rate limited — the model provider is temporarily unavailable. Try again shortly or switch to another model with /model."
+        elif "401" in error_msg or "403" in error_msg:
+            error_msg = "Authentication failed — check your API key configuration."
+        elif "timeout" in error_msg.lower():
+            error_msg = "Request timed out — the model provider may be slow. Try again."
         await state.broadcast({
             "type": "error",
-            "message": str(exc),
+            "message": error_msg,
         })
 
 

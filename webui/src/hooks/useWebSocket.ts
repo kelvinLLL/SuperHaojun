@@ -95,6 +95,23 @@ export function useWebSocket() {
           provider: msg.provider,
           base_url: msg.base_url,
         });
+        // Refresh models list after switch
+        fetchModels();
+        break;
+
+      case "command_response":
+        // Show command output as a system message in chat
+        useChatStore.setState((s) => ({
+          messages: [
+            ...s.messages,
+            {
+              id: crypto.randomUUID(),
+              role: "system" as const,
+              content: `/${msg.command}\n${msg.output}`,
+              timestamp: Date.now(),
+            },
+          ],
+        }));
         break;
 
       case "error":

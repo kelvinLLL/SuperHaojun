@@ -8,7 +8,7 @@ import httpx
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import AsyncOpenAI, NOT_GIVEN
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from .bus import MessageBus
@@ -123,19 +123,20 @@ class Agent:
         while True:
             await self.bus.emit(TurnStart())
 
+            # Build API kwargs dynamically to avoid NOT_GIVEN sentinel issues
+            create_kwargs: dict[str, Any] = {
+                "model": self.config.model_id,
+                "messages": self._build_messages(),
+                "stream": True,
+            }
+
             tools_param = self.registry.to_openai_tools() if len(self.registry) > 0 else None
-
-            extra: dict[str, Any] = {}
+            if tools_param:
+                create_kwargs["tools"] = tools_param
             if self.config.is_reasoning:
-                extra["reasoning"] = {"enabled": True}
+                create_kwargs["extra_body"] = {"reasoning": {"enabled": True}}
 
-            stream = await self.client.chat.completions.create(
-                model=self.config.model_id,
-                messages=self._build_messages(),
-                tools=tools_param if tools_param else NOT_GIVEN,
-                stream=True,
-                extra_body=extra if extra else NOT_GIVEN,
-            )
+            stream = await self.client.chat.completions.create(**create_kwargs)
 
             text_chunks: list[str] = []
             reasoning_chunks: list[str] = []

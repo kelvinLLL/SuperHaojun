@@ -108,5 +108,6 @@ export type WSMessage =
   | { type: "agent_start"; id: string }
   | { type: "agent_end"; id: string }
   | { type: "model_changed"; key: string; model_id: string; provider: string; base_url: string }
+  | { type: "command_response"; command: string; output: string }
   | { type: "error"; message: string }
   | { type: "pong" };

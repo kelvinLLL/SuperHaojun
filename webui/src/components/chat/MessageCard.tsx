@@ -108,18 +108,34 @@ export function MessageCard({ message }: MessageCardProps) {
         </div>
       )}
 
-      {/* System messages */}
+      {/* System / command response messages */}
       {isSystem && (
-        <div className="flex items-center justify-center py-2">
+        <div className="py-2 ml-10">
           <div
-            className="flex items-center gap-2 px-4 py-1.5 rounded-full text-[11px]"
+            className="rounded-xl px-4 py-3"
             style={{
-              background: "rgba(224, 175, 104, 0.08)",
-              color: "var(--accent-yellow)",
+              background: "rgba(187, 154, 247, 0.06)",
+              border: "1px solid rgba(187, 154, 247, 0.15)",
             }}
           >
-            <AlertTriangle size={12} />
-            {message.content}
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <AlertTriangle size={11} style={{ color: "var(--accent-magenta)" }} />
+              <span className="text-[10px] font-medium" style={{ color: "var(--accent-magenta)" }}>
+                System
+              </span>
+            </div>
+            <pre
+              className="text-xs font-mono whitespace-pre-wrap"
+              style={{
+                color: "var(--text-secondary)",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                margin: 0,
+              }}
+            >
+              {message.content}
+            </pre>
           </div>
         </div>
       )}
