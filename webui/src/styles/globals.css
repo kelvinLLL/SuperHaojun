@@ -1,13 +1,16 @@
 @import "tailwindcss";
 
-/* ── Tokyo Night Color Palette ── */
+/* ── Tokyo Night Storm Color Palette ── */
 :root {
   --bg-primary: #1a1b26;
-  --bg-secondary: #16161e;
-  --bg-surface: #1f2335;
-  --bg-hover: #292e42;
+  --bg-secondary: #13141c;
+  --bg-surface: #1e1f2e;
+  --bg-elevated: #252736;
+  --bg-hover: #2a2c3e;
   --bg-active: #33467c;
-  --border: #3b4261;
+  --bg-glass: rgba(30, 31, 46, 0.75);
+  --border: rgba(59, 66, 97, 0.5);
+  --border-subtle: rgba(59, 66, 97, 0.25);
   --text-primary: #c0caf5;
   --text-secondary: #a9b1d6;
   --text-dim: #565f89;
@@ -20,6 +23,16 @@
   --accent-red: #f7768e;
   --accent-magenta: #bb9af7;
   --accent-teal: #73daca;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-glow-blue: 0 0 20px rgba(122, 162, 247, 0.15);
+  --shadow-glow-cyan: 0 0 20px rgba(125, 207, 255, 0.15);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
 }
 
 * {
@@ -32,10 +45,11 @@ html, body, #root {
   height: 100%;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Scrollbar ── */
@@ -44,21 +58,200 @@ html, body, #root {
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--bg-secondary);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: rgba(86, 95, 137, 0.3);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-dim);
+  background: rgba(86, 95, 137, 0.6);
 }
 
 /* ── Selection ── */
 ::selection {
-  background: var(--bg-active);
+  background: rgba(122, 162, 247, 0.3);
   color: var(--text-primary);
 }
+
+/* ── Code blocks ── */
+pre, code {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+pre {
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  overflow-x: auto;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+code {
+  background: var(--bg-elevated);
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.88em;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+}
+
+/* ── Markdown rendering ── */
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  color: var(--text-primary);
+  margin-top: 20px;
+  margin-bottom: 10px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.markdown-body h1 { font-size: 1.4em; }
+.markdown-body h2 { font-size: 1.2em; }
+.markdown-body h3 { font-size: 1.05em; }
+
+.markdown-body p {
+  margin: 8px 0;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.markdown-body ul, .markdown-body ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.markdown-body li {
+  margin: 4px 0;
+  color: var(--text-secondary);
+}
+
+.markdown-body a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+.markdown-body a:hover {
+  border-bottom-color: var(--accent-cyan);
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid var(--accent-magenta);
+  padding-left: 16px;
+  color: var(--text-dim);
+  margin: 12px 0;
+  font-style: italic;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--border);
+  padding: 8px 14px;
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+/* ── Animations ── */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ── Glassmorphism ── */
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Button hover ── */
+.btn-hover {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.btn-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+.btn-hover:active {
+  transform: translateY(0);
+}
+
+/* ── Status dot ── */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  position: relative;
+}
+.status-dot.running { background: var(--accent-green); box-shadow: 0 0 8px rgba(158, 206, 106, 0.5); }
+.status-dot.error { background: var(--accent-red); box-shadow: 0 0 8px rgba(247, 118, 142, 0.5); }
+.status-dot.stopped { background: var(--text-dim); }
+.status-dot.starting { background: var(--accent-yellow); animation: pulse-glow 1s infinite; }
+
+/* ── Typing indicator ── */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  display: inline-block;
+}
+.typing-dot:nth-child(1) { animation: typing-dot 1.4s infinite 0s; }
+.typing-dot:nth-child(2) { animation: typing-dot 1.4s infinite 0.2s; }
+.typing-dot:nth-child(3) { animation: typing-dot 1.4s infinite 0.4s; }
 
 /* ── CRT Scanline Effect (toggle-able) ── */
 .crt-effect::after {
@@ -75,108 +268,3 @@ html, body, #root {
     transparent 2px
   );
 }
-
-/* ── Code blocks ── */
-pre, code {
-  font-family: inherit;
-}
-
-pre {
-  background: var(--bg-secondary) !important;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px 16px;
-  overflow-x: auto;
-  margin: 8px 0;
-}
-
-code {
-  background: var(--bg-surface);
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 0.9em;
-}
-
-pre code {
-  background: none;
-  padding: 0;
-}
-
-/* ── Markdown rendering ── */
-.markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  color: var(--accent-blue);
-  margin-top: 16px;
-  margin-bottom: 8px;
-  font-weight: 600;
-}
-.markdown-body h1 { font-size: 1.3em; }
-.markdown-body h2 { font-size: 1.15em; }
-.markdown-body h3 { font-size: 1.05em; }
-
-.markdown-body p {
-  margin: 6px 0;
-}
-
-.markdown-body ul, .markdown-body ol {
-  padding-left: 20px;
-  margin: 6px 0;
-}
-
-.markdown-body a {
-  color: var(--accent-cyan);
-  text-decoration: none;
-}
-.markdown-body a:hover {
-  text-decoration: underline;
-}
-
-.markdown-body blockquote {
-  border-left: 3px solid var(--accent-magenta);
-  padding-left: 12px;
-  color: var(--text-secondary);
-  margin: 8px 0;
-}
-
-.markdown-body table {
-  border-collapse: collapse;
-  margin: 8px 0;
-}
-.markdown-body th, .markdown-body td {
-  border: 1px solid var(--border);
-  padding: 6px 12px;
-}
-.markdown-body th {
-  background: var(--bg-surface);
-  font-weight: 600;
-}
-
-/* ── Animations ── */
-@keyframes pulse-glow {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
-}
-
-@keyframes slide-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-slide-in {
-  animation: slide-in 0.2s ease-out;
-}
-
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-/* ── Status dot ── */
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.status-dot.running { background: var(--accent-green); }
-.status-dot.error { background: var(--accent-red); }
-.status-dot.stopped { background: var(--text-dim); }
-.status-dot.starting { background: var(--accent-yellow); animation: pulse-glow 1s infinite; }

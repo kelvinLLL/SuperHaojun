@@ -10,66 +10,73 @@ interface PermissionModalProps {
   onRespond: (toolCallId: string, granted: boolean) => void;
 }
 
-const RISK_COLORS: Record<string, string> = {
-  read: "var(--accent-green)",
-  write: "var(--accent-yellow)",
-  dangerous: "var(--accent-red)",
+const RISK_CONFIG: Record<string, { color: string; bg: string }> = {
+  read: { color: "var(--accent-green)", bg: "rgba(158, 206, 106, 0.1)" },
+  write: { color: "var(--accent-yellow)", bg: "rgba(224, 175, 104, 0.1)" },
+  dangerous: { color: "var(--accent-red)", bg: "rgba(247, 118, 142, 0.1)" },
 };
 
 export function PermissionModal({ request, onRespond }: PermissionModalProps) {
-  const riskColor = RISK_COLORS[request.risk_level] || "var(--accent-yellow)";
+  const risk = RISK_CONFIG[request.risk_level] || RISK_CONFIG.write;
   const RiskIcon = request.risk_level === "dangerous" ? ShieldAlert :
                    request.risk_level === "write" ? Shield : ShieldCheck;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-50">
-      {/* Backdrop */}
+    <div className="fixed inset-0 flex items-center justify-center z-50 animate-fade-in">
       <div
         className="absolute inset-0"
-        style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+        style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
         onClick={() => onRespond(request.tool_call_id, false)}
       />
 
-      {/* Modal */}
       <div
-        className="relative rounded-lg p-6 max-w-md w-full mx-4 animate-slide-in"
+        className="relative rounded-2xl p-6 max-w-md w-full mx-4 animate-slide-up"
         style={{
-          background: "var(--bg-surface)",
-          border: `1px solid ${riskColor}`,
-          boxShadow: `0 0 30px ${riskColor}20`,
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border)",
+          boxShadow: "var(--shadow-lg)",
         }}
       >
-        <div className="flex items-center gap-3 mb-4">
-          <RiskIcon size={24} style={{ color: riskColor }} />
-          <div>
-            <h3 className="font-semibold text-sm" style={{ color: "var(--text-primary)" }}>
-              Permission Request
+        <div className="flex items-start gap-3 mb-5">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+            style={{ background: risk.bg }}
+          >
+            <RiskIcon size={20} style={{ color: risk.color }} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-sm mb-0.5" style={{ color: "var(--text-primary)" }}>
+              Permission Required
             </h3>
-            <p className="text-[11px]" style={{ color: "var(--text-dim)" }}>
-              Risk level: <span style={{ color: riskColor }}>{request.risk_level}</span>
-            </p>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10px] font-medium px-2 py-0.5 rounded-full uppercase tracking-wider"
+                style={{ background: risk.bg, color: risk.color }}
+              >
+                {request.risk_level}
+              </span>
+            </div>
           </div>
           <button
             onClick={() => onRespond(request.tool_call_id, false)}
-            className="ml-auto p-1 rounded"
+            className="p-1.5 rounded-lg transition-colors"
             style={{ color: "var(--text-dim)" }}
           >
             <X size={16} />
           </button>
         </div>
 
-        <div className="mb-4">
-          <div
-            className="text-xs font-medium mb-1"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            Tool: <span style={{ color: "var(--accent-cyan)" }}>{request.tool_name}</span>
+        <div className="mb-5">
+          <div className="text-xs mb-2" style={{ color: "var(--text-dim)" }}>
+            Tool: <span className="font-medium" style={{ color: "var(--accent-cyan)" }}>{request.tool_name}</span>
           </div>
           <pre
-            className="text-[11px] p-3 rounded overflow-auto max-h-40"
+            className="text-[12px] p-3 rounded-xl overflow-auto max-h-40 font-mono"
             style={{
-              background: "var(--bg-primary)",
+              background: "var(--bg-secondary)",
               color: "var(--text-secondary)",
+              border: "none",
+              margin: 0,
             }}
           >
             {JSON.stringify(request.arguments, null, 2)}
@@ -79,21 +86,23 @@ export function PermissionModal({ request, onRespond }: PermissionModalProps) {
         <div className="flex gap-3">
           <button
             onClick={() => onRespond(request.tool_call_id, false)}
-            className="flex-1 py-2 rounded text-xs font-medium transition-colors"
+            className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 btn-hover"
             style={{
-              background: "var(--bg-hover)",
-              color: "var(--accent-red)",
-              border: "1px solid var(--accent-red)",
+              background: "transparent",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border)",
             }}
           >
             Deny
           </button>
           <button
             onClick={() => onRespond(request.tool_call_id, true)}
-            className="flex-1 py-2 rounded text-xs font-medium transition-colors"
+            className="flex-1 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 btn-hover"
             style={{
-              background: "var(--accent-green)",
-              color: "var(--bg-primary)",
+              background: "linear-gradient(135deg, var(--accent-green), var(--accent-teal))",
+              color: "#fff",
+              border: "none",
+              boxShadow: "0 0 12px rgba(158, 206, 106, 0.2)",
             }}
           >
             Approve

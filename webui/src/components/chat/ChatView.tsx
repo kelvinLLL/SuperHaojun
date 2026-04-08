@@ -5,6 +5,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { StreamingCard } from "./StreamingCard";
 import { ChatInput } from "./ChatInput";
 import { PermissionModal } from "../shared/PermissionModal";
+import { Sparkles } from "lucide-react";
 
 interface ChatViewProps {
   onSend: (text: string) => void;
@@ -19,53 +20,97 @@ export function ChatView({ onSend, onPermission }: ChatViewProps) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText, toolCalls]);
 
+  const isEmpty = messages.length === 0 && !isStreaming;
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {/* Message area */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.length === 0 && !isStreaming && (
-          <div className="flex flex-col items-center justify-center h-full gap-4">
-            <div className="text-4xl">⚡</div>
-            <h2 className="text-lg font-semibold" style={{ color: "var(--accent-cyan)" }}>
-              SuperHaojun
-            </h2>
-            <p className="text-sm" style={{ color: "var(--text-dim)" }}>
-              AI-powered coding assistant. Type a message to start.
-            </p>
-          </div>
-        )}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto px-6 py-6">
+          {isEmpty && (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 animate-fade-in">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{
+                  background: "linear-gradient(135deg, var(--accent-blue), var(--accent-magenta))",
+                  boxShadow: "var(--shadow-glow-blue)",
+                }}
+              >
+                <Sparkles size={28} color="#fff" />
+              </div>
+              <div className="text-center">
+                <h2
+                  className="text-xl font-semibold mb-2"
+                  style={{ color: "var(--text-primary)", letterSpacing: "-0.02em" }}
+                >
+                  SuperHaojun
+                </h2>
+                <p
+                  className="text-sm max-w-md"
+                  style={{ color: "var(--text-dim)", lineHeight: 1.7 }}
+                >
+                  AI-powered coding assistant. Ask me anything about code,
+                  architecture, debugging, or let me help build your project.
+                </p>
+              </div>
+              <div className="flex gap-2 mt-2">
+                {["Explain this code", "Fix a bug", "Write tests"].map((text) => (
+                  <button
+                    key={text}
+                    onClick={() => onSend(text)}
+                    className="px-4 py-2 rounded-xl text-xs font-medium btn-hover"
+                    style={{
+                      background: "var(--bg-elevated)",
+                      color: "var(--text-secondary)",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    {text}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-        {messages.map((msg) => (
-          <MessageCard key={msg.id} message={msg} />
-        ))}
+          {!isEmpty && (
+            <div className="space-y-1">
+              {messages.map((msg) => (
+                <MessageCard key={msg.id} message={msg} />
+              ))}
 
-        {/* Active tool calls */}
-        {Object.values(toolCalls).map((tc) => (
-          <ToolCallCard key={tc.tool_call_id} toolCall={tc} />
-        ))}
+              {/* Active tool calls */}
+              {Object.values(toolCalls).map((tc) => (
+                <ToolCallCard key={tc.tool_call_id} toolCall={tc} />
+              ))}
 
-        {/* Streaming text */}
-        {isStreaming && streamingText && (
-          <StreamingCard text={streamingText} />
-        )}
+              {/* Streaming text */}
+              {isStreaming && streamingText && (
+                <StreamingCard text={streamingText} />
+              )}
 
-        {/* Streaming indicator (no text yet) */}
-        {isStreaming && !streamingText && Object.keys(toolCalls).length === 0 && (
-          <div
-            className="flex items-center gap-2 px-4 py-3 rounded-lg animate-pulse-glow"
-            style={{ background: "var(--bg-surface)" }}
-          >
-            <div
-              className="w-2 h-2 rounded-full"
-              style={{ background: "var(--accent-cyan)" }}
-            />
-            <span className="text-xs" style={{ color: "var(--text-dim)" }}>
-              Thinking...
-            </span>
-          </div>
-        )}
+              {/* Thinking indicator */}
+              {isStreaming && !streamingText && Object.keys(toolCalls).length === 0 && (
+                <div className="flex items-start gap-3 py-4 animate-fade-in">
+                  <div
+                    className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    style={{
+                      background: "linear-gradient(135deg, var(--accent-cyan), var(--accent-teal))",
+                    }}
+                  >
+                    <Sparkles size={14} color="#fff" />
+                  </div>
+                  <div className="flex items-center gap-1.5 pt-2">
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                    <span className="typing-dot" />
+                  </div>
+                </div>
+              )}
 
-        <div ref={bottomRef} />
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Input */}

@@ -1,5 +1,5 @@
 import { useChatStore, usePanelStore } from "@/stores";
-import { Activity, Cpu, Zap, FileWarning, Eye, Wrench } from "lucide-react";
+import { Activity, Cpu, Zap, Wrench, Command } from "lucide-react";
 
 export function Sidebar() {
   const { sidebarOpen } = usePanelStore();
@@ -15,74 +15,91 @@ export function Sidebar() {
 
   return (
     <aside
-      className="w-64 shrink-0 border-l overflow-y-auto"
-      style={{ borderColor: "var(--border)", background: "var(--bg-secondary)" }}
+      className="w-60 shrink-0 overflow-y-auto"
+      style={{
+        borderLeft: "1px solid var(--border-subtle)",
+        background: "var(--bg-secondary)",
+      }}
     >
       {/* Token Usage */}
-      <section className="p-3 border-b" style={{ borderColor: "var(--border)" }}>
+      <section className="p-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
         <h3
-          className="text-[11px] uppercase tracking-wider mb-2 flex items-center gap-1.5"
+          className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
           style={{ color: "var(--text-dim)" }}
         >
-          <Cpu size={12} /> Context Window
+          <Cpu size={11} /> Context
         </h3>
-        <div className="mb-1">
-          <div className="flex justify-between text-[11px] mb-1">
+        <div className="mb-2">
+          <div className="flex justify-between text-[12px] mb-1.5">
             <span style={{ color: "var(--text-secondary)" }}>
-              {tokenUsage.estimated_tokens.toLocaleString()} tokens
+              {tokenUsage.estimated_tokens.toLocaleString()}
             </span>
-            <span style={{ color: pct > 80 ? "var(--accent-red)" : "var(--text-dim)" }}>
+            <span
+              className="font-medium"
+              style={{
+                color: pct > 80 ? "var(--accent-red)" :
+                       pct > 60 ? "var(--accent-yellow)" :
+                       "var(--text-dim)",
+              }}
+            >
               {pct}%
             </span>
           </div>
           <div
-            className="h-1.5 rounded-full overflow-hidden"
+            className="h-1 rounded-full overflow-hidden"
             style={{ background: "var(--bg-primary)" }}
           >
             <div
-              className="h-full rounded-full transition-all duration-500"
+              className="h-full rounded-full transition-all duration-700 ease-out"
               style={{
                 width: `${Math.min(pct, 100)}%`,
                 background:
-                  pct > 80 ? "var(--accent-red)" :
-                  pct > 60 ? "var(--accent-yellow)" :
-                  "var(--accent-blue)",
+                  pct > 80
+                    ? "linear-gradient(90deg, var(--accent-orange), var(--accent-red))"
+                    : pct > 60
+                    ? "linear-gradient(90deg, var(--accent-yellow), var(--accent-orange))"
+                    : "linear-gradient(90deg, var(--accent-blue), var(--accent-cyan))",
               }}
             />
           </div>
         </div>
         <div className="flex justify-between text-[10px]" style={{ color: "var(--text-dim)" }}>
-          <span>{tokenUsage.message_count} msgs</span>
-          <span>{tokenUsage.compaction_count} compactions</span>
+          <span>{tokenUsage.message_count} messages</span>
+          <span>{tokenUsage.compaction_count} compacts</span>
         </div>
       </section>
 
       {/* Status */}
-      <section className="p-3 border-b" style={{ borderColor: "var(--border)" }}>
+      <section className="p-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
         <h3
-          className="text-[11px] uppercase tracking-wider mb-2 flex items-center gap-1.5"
+          className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
           style={{ color: "var(--text-dim)" }}
         >
-          <Activity size={12} /> Status
+          <Activity size={11} /> Status
         </h3>
-        <div className="flex items-center gap-2 text-xs">
-          <span
-            className="status-dot"
-            style={{
-              background: isStreaming ? "var(--accent-green)" : "var(--text-dim)",
-            }}
-          />
-          <span style={{ color: "var(--text-secondary)" }}>
-            {isStreaming ? "Generating..." : "Idle"}
+        <div className="flex items-center gap-2.5">
+          <div className="relative">
+            <span
+              className="status-dot"
+              style={{
+                background: isStreaming ? "var(--accent-green)" : "var(--text-dim)",
+              }}
+            />
+          </div>
+          <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            {isStreaming ? "Generating..." : "Ready"}
           </span>
         </div>
         {activeToolCalls.length > 0 && (
-          <div className="mt-2 space-y-1">
+          <div className="mt-3 space-y-1.5">
             {activeToolCalls.map((tc) => (
               <div
                 key={tc.tool_call_id}
-                className="flex items-center gap-1.5 text-[11px] animate-pulse-glow"
-                style={{ color: "var(--accent-yellow)" }}
+                className="flex items-center gap-2 text-[11px] px-2.5 py-1.5 rounded-lg animate-pulse-glow"
+                style={{
+                  color: "var(--accent-yellow)",
+                  background: "rgba(224, 175, 104, 0.08)",
+                }}
               >
                 <Zap size={10} /> {tc.tool_name}
               </div>
@@ -92,20 +109,32 @@ export function Sidebar() {
       </section>
 
       {/* Tools */}
-      <section className="p-3 border-b" style={{ borderColor: "var(--border)" }}>
+      <section className="p-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
         <h3
-          className="text-[11px] uppercase tracking-wider mb-2 flex items-center gap-1.5"
+          className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
           style={{ color: "var(--text-dim)" }}
         >
-          <Wrench size={12} /> Tools ({tools.length})
+          <Wrench size={11} /> Tools
+          <span
+            className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+            style={{ background: "var(--bg-elevated)", color: "var(--text-dim)" }}
+          >
+            {tools.length}
+          </span>
         </h3>
-        <div className="space-y-0.5 max-h-40 overflow-y-auto">
+        <div className="space-y-0.5 max-h-44 overflow-y-auto">
           {tools.map((t) => (
             <div
               key={t.name}
-              className="text-[11px] py-0.5 px-1 rounded truncate"
+              className="text-[11px] py-1 px-2.5 rounded-md truncate transition-colors cursor-default"
               style={{ color: "var(--text-secondary)" }}
               title={t.description}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--bg-hover)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
             >
               {t.name}
             </div>
@@ -113,17 +142,33 @@ export function Sidebar() {
         </div>
       </section>
 
-      {/* Keyboard shortcuts */}
-      <section className="p-3">
+      {/* Shortcuts */}
+      <section className="p-4">
         <h3
-          className="text-[11px] uppercase tracking-wider mb-2 flex items-center gap-1.5"
+          className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
           style={{ color: "var(--text-dim)" }}
         >
-          <Eye size={12} /> Shortcuts
+          <Command size={11} /> Shortcuts
         </h3>
-        <div className="space-y-1 text-[10px]" style={{ color: "var(--text-dim)" }}>
-          <div><kbd className="px-1 rounded" style={{ background: "var(--bg-surface)" }}>⌘ Enter</kbd> Send</div>
-          <div><kbd className="px-1 rounded" style={{ background: "var(--bg-surface)" }}>Esc</kbd> Interrupt</div>
+        <div className="space-y-2 text-[11px]" style={{ color: "var(--text-dim)" }}>
+          <div className="flex items-center justify-between">
+            <span>Send message</span>
+            <kbd
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono"
+              style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)" }}
+            >
+              ⌘↵
+            </kbd>
+          </div>
+          <div className="flex items-center justify-between">
+            <span>Interrupt</span>
+            <kbd
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono"
+              style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)" }}
+            >
+              Esc
+            </kbd>
+          </div>
         </div>
       </section>
     </aside>

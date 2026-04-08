@@ -15,60 +15,79 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div
-      className="rounded-lg overflow-hidden animate-slide-in"
-      style={{
-        background: "var(--bg-secondary)",
-        border: `1px solid ${toolCall.done ? "var(--border)" : "var(--accent-yellow)"}`,
-      }}
-    >
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
-        style={{ background: "transparent" }}
+    <div className="ml-10 animate-slide-up">
+      <div
+        className="rounded-xl overflow-hidden"
+        style={{
+          background: "var(--bg-surface)",
+          border: "1px solid var(--border-subtle)",
+        }}
       >
-        {toolCall.done ? (
-          <Check size={14} style={{ color: "var(--accent-green)" }} />
-        ) : (
-          <Loader size={14} className="animate-spin" style={{ color: "var(--accent-yellow)" }} />
-        )}
-        <Wrench size={12} style={{ color: "var(--text-dim)" }} />
-        <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
-          {toolCall.tool_name}
-        </span>
-        <span className="text-[10px] ml-auto" style={{ color: "var(--text-dim)" }}>
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="px-3 pb-3 space-y-2">
-          <div>
-            <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--text-dim)" }}>
-              Arguments
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left transition-all duration-200"
+          style={{ background: "transparent" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+        >
+          {toolCall.done ? (
+            <div
+              className="w-5 h-5 rounded-md flex items-center justify-center"
+              style={{ background: "rgba(158, 206, 106, 0.15)" }}
+            >
+              <Check size={12} style={{ color: "var(--accent-green)" }} />
             </div>
-            <pre className="text-[11px] p-2 rounded overflow-x-auto" style={{ background: "var(--bg-primary)" }}>
-              {JSON.stringify(toolCall.arguments, null, 2)}
-            </pre>
-          </div>
-          {toolCall.result !== undefined && (
+          ) : (
+            <Loader size={14} className="animate-spin" style={{ color: "var(--accent-cyan)" }} />
+          )}
+          <Wrench size={12} style={{ color: "var(--text-dim)" }} />
+          <span className="text-xs font-medium" style={{ color: "var(--text-primary)" }}>
+            {toolCall.tool_name}
+          </span>
+          <span className="ml-auto">
+            {expanded ? (
+              <ChevronDown size={12} style={{ color: "var(--text-dim)" }} />
+            ) : (
+              <ChevronRight size={12} style={{ color: "var(--text-dim)" }} />
+            )}
+          </span>
+        </button>
+
+        {expanded && (
+          <div className="px-4 pb-3 space-y-2.5 animate-fade-in">
             <div>
-              <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--text-dim)" }}>
-                Result
+              <div
+                className="text-[10px] uppercase tracking-widest mb-1.5 font-medium"
+                style={{ color: "var(--text-dim)" }}
+              >
+                Arguments
               </div>
               <pre
-                className="text-[11px] p-2 rounded overflow-x-auto max-h-60 overflow-y-auto"
-                style={{
-                  background: "var(--bg-primary)",
-                  color: "var(--text-secondary)",
-                }}
+                className="text-[12px] p-3 rounded-lg overflow-x-auto font-mono"
+                style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", border: "none", margin: 0 }}
               >
-                {toolCall.result}
+                {JSON.stringify(toolCall.arguments, null, 2)}
               </pre>
             </div>
-          )}
-        </div>
-      )}
+            {toolCall.result !== undefined && (
+              <div>
+                <div
+                  className="text-[10px] uppercase tracking-widest mb-1.5 font-medium"
+                  style={{ color: "var(--text-dim)" }}
+                >
+                  Result
+                </div>
+                <pre
+                  className="text-[12px] p-3 rounded-lg overflow-x-auto max-h-48 overflow-y-auto font-mono"
+                  style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", border: "none", margin: 0 }}
+                >
+                  {toolCall.result}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

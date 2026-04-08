@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Send } from "lucide-react";
+import { ArrowUp } from "lucide-react";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
@@ -15,7 +15,6 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
     if (!trimmed || disabled) return;
     onSend(trimmed);
     setText("");
-    // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
@@ -28,7 +27,6 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
     }
   };
 
-  // Auto-grow textarea
   useEffect(() => {
     const ta = textareaRef.current;
     if (ta) {
@@ -37,45 +35,66 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
     }
   }, [text]);
 
+  const canSend = text.trim() && !disabled;
+
   return (
-    <div
-      className="border-t px-4 py-3"
-      style={{ borderColor: "var(--border)", background: "var(--bg-secondary)" }}
-    >
-      <div
-        className="flex items-end gap-2 rounded-lg p-2"
-        style={{
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border)",
-        }}
-      >
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={disabled ? "Agent is working..." : "Type a message... (⌘+Enter to send)"}
-          disabled={disabled}
-          rows={1}
-          className="flex-1 bg-transparent resize-none outline-none text-sm"
+    <div className="shrink-0 px-6 pb-4 pt-2">
+      <div className="max-w-3xl mx-auto">
+        <div
+          className="flex items-end gap-3 rounded-2xl px-4 py-3 transition-all duration-200"
           style={{
-            color: "var(--text-primary)",
-            caretColor: "var(--accent-cyan)",
-            minHeight: "24px",
-            maxHeight: "200px",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border)",
+            boxShadow: "var(--shadow-lg)",
           }}
-        />
-        <button
-          onClick={handleSend}
-          disabled={disabled || !text.trim()}
-          className="p-1.5 rounded transition-colors shrink-0"
-          style={{
-            background: text.trim() && !disabled ? "var(--accent-blue)" : "var(--bg-hover)",
-            color: text.trim() && !disabled ? "#fff" : "var(--text-dim)",
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = "var(--accent-blue)";
+            e.currentTarget.style.boxShadow = "var(--shadow-glow-blue)";
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "var(--border)";
+            e.currentTarget.style.boxShadow = "var(--shadow-lg)";
           }}
         >
-          <Send size={14} />
-        </button>
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={disabled ? "Generating..." : "Message SuperHaojun..."}
+            disabled={disabled}
+            rows={1}
+            className="flex-1 bg-transparent resize-none outline-none text-sm leading-relaxed"
+            style={{
+              color: "var(--text-primary)",
+              caretColor: "var(--accent-cyan)",
+              minHeight: "24px",
+              maxHeight: "200px",
+            }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!canSend}
+            className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200"
+            style={{
+              background: canSend
+                ? "linear-gradient(135deg, var(--accent-blue), var(--accent-cyan))"
+                : "var(--bg-hover)",
+              color: canSend ? "#fff" : "var(--text-dim)",
+              boxShadow: canSend ? "var(--shadow-glow-blue)" : "none",
+              cursor: canSend ? "pointer" : "default",
+              opacity: canSend ? 1 : 0.5,
+            }}
+          >
+            <ArrowUp size={16} strokeWidth={2.5} />
+          </button>
+        </div>
+        <p
+          className="text-[10px] text-center mt-2"
+          style={{ color: "var(--text-dim)" }}
+        >
+          ⌘+Enter to send
+        </p>
       </div>
     </div>
   );

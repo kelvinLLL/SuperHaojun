@@ -34,6 +34,7 @@ class ChatMessage:
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
     name: str | None = None
+    reasoning_details: Any = None
 
 
 @dataclass
@@ -97,7 +98,10 @@ class Agent:
                 msg["tool_calls"] = m.tool_calls
                 msgs.append(msg)  # type: ignore[arg-type]
             else:
-                msgs.append({"role": m.role, "content": m.content or ""})  # type: ignore[arg-type]
+                entry: dict[str, Any] = {"role": m.role, "content": m.content or ""}
+                if m.reasoning_details is not None:
+                    entry["reasoning_details"] = m.reasoning_details
+                msgs.append(entry)  # type: ignore[arg-type]
         return msgs
 
     async def handle_user_message(self, user_input: str) -> None:
@@ -121,14 +125,20 @@ class Agent:
 
             tools_param = self.registry.to_openai_tools() if len(self.registry) > 0 else None
 
+            extra: dict[str, Any] = {}
+            if self.config.is_reasoning:
+                extra["reasoning"] = {"enabled": True}
+
             stream = await self.client.chat.completions.create(
                 model=self.config.model_id,
                 messages=self._build_messages(),
                 tools=tools_param if tools_param else NOT_GIVEN,
                 stream=True,
+                extra_body=extra if extra else NOT_GIVEN,
             )
 
             text_chunks: list[str] = []
+            reasoning_chunks: list[str] = []
             tool_calls_buf: dict[int, ToolCallInfo] = {}
             finish_reason: str | None = None
 
@@ -141,6 +151,10 @@ class Agent:
                     finish_reason = choice.finish_reason
 
                 delta = choice.delta
+
+                # Capture reasoning content (OpenRouter extended field)
+                if delta and hasattr(delta, "reasoning") and delta.reasoning:
+                    reasoning_chunks.append(delta.reasoning)
 
                 if delta and delta.content:
                     text_chunks.append(delta.content)
@@ -186,7 +200,11 @@ class Agent:
                 await self._execute_tool_calls(sorted_calls)
                 continue
 
-            self.messages.append(ChatMessage(role="assistant", content="".join(text_chunks)))
+            self.messages.append(ChatMessage(
+                role="assistant",
+                content="".join(text_chunks),
+                reasoning_details="".join(reasoning_chunks) if reasoning_chunks else None,
+            ))
             break
 
         # Hook: STOP — allows hooks to inspect/augment final response

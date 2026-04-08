@@ -16,6 +16,7 @@ class EnvConfig(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     model_id: str = "gpt-4o"
     model_provider: str = "openai"
+    model_api: str = "openai-completions"
 
 
 @dataclass(frozen=True)
@@ -24,13 +25,14 @@ class ModelConfig:
     model_id: str
     base_url: str
     api_key: str
+    api_type: str = "openai-completions"
     is_reasoning: bool = field(init=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
             "is_reasoning",
-            bool(re.search(r"o[1-9]|gpt-5", self.model_id)),
+            bool(re.search(r"o[1-9]|gpt-5|step-3|deepseek-r", self.model_id)),
         )
 
 
@@ -41,6 +43,7 @@ def load_config() -> ModelConfig:
         model_id=env.model_id,
         base_url=env.openai_base_url,
         api_key=env.openai_api_key,
+        api_type=env.model_api,
     )
 
 
