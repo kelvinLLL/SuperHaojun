@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatMessageData } from "@/types";
-import { User, Sparkles, Terminal, AlertTriangle } from "lucide-react";
+import { Sparkles, Terminal, AlertTriangle, ChevronRight } from "lucide-react";
 
 interface MessageCardProps {
   message: ChatMessageData;
@@ -13,56 +13,51 @@ export function MessageCard({ message }: MessageCardProps) {
   const isTool = message.role === "tool";
   const isSystem = message.role === "system";
 
+  const time = new Date(message.timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
   return (
-    <div className="animate-slide-up" style={{ paddingTop: isUser ? 16 : 4, paddingBottom: 4 }}>
-      {/* User messages */}
+    <div className="animate-slide-up" style={{ marginTop: isUser ? 20 : 6, marginBottom: 2 }}>
+      {/* ── User bubble (right-aligned) ── */}
       {isUser && (
-        <div className="flex items-start gap-3">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-            style={{ background: "var(--accent-blue)", opacity: 0.9 }}
-          >
-            <User size={14} color="#fff" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                You
-              </span>
-              <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
-                {new Date(message.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
-            <p
-              className="text-sm leading-relaxed"
-              style={{ color: "var(--text-primary)", whiteSpace: "pre-wrap" }}
+        <div className="flex justify-end">
+          <div className="max-w-[75%]">
+            <div
+              className="rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed"
+              style={{
+                background: "linear-gradient(135deg, rgba(122,162,247,0.22), rgba(125,207,255,0.13))",
+                border: "1px solid rgba(122,162,247,0.18)",
+                color: "var(--text-primary)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
             >
               {message.content}
-            </p>
+            </div>
+            <div
+              className="text-[10px] text-right mt-1 mr-1"
+              style={{ color: "var(--text-dim)" }}
+            >
+              {time}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Assistant messages */}
+      {/* ── Assistant message (left-aligned, no bubble) ── */}
       {isAssistant && (
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-2.5 max-w-[85%]">
           <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+            className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
             style={{
               background: "linear-gradient(135deg, var(--accent-cyan), var(--accent-teal))",
             }}
           >
-            <Sparkles size={14} color="#fff" />
+            <Sparkles size={12} color="#fff" />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                SuperHaojun
-              </span>
-              <span className="text-[10px]" style={{ color: "var(--text-dim)" }}>
-                {new Date(message.timestamp).toLocaleTimeString()}
-              </span>
-            </div>
             {message.content && (
               <div className="markdown-body text-sm">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -70,35 +65,39 @@ export function MessageCard({ message }: MessageCardProps) {
                 </ReactMarkdown>
               </div>
             )}
+            <div className="text-[10px] mt-1" style={{ color: "var(--text-dim)" }}>
+              {time}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Tool result messages */}
+      {/* ── Tool result (compact inline) ── */}
       {isTool && (
-        <div className="ml-10">
+        <div className="ml-8">
           <div
-            className="rounded-xl px-4 py-3 text-xs"
+            className="rounded-lg px-3 py-2 text-xs"
             style={{
               background: "var(--bg-surface)",
               border: "1px solid var(--border-subtle)",
             }}
           >
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <Terminal size={11} style={{ color: "var(--accent-green)" }} />
-              <span className="font-medium" style={{ color: "var(--accent-green)" }}>
+            <div className="flex items-center gap-1.5">
+              <Terminal size={10} style={{ color: "var(--accent-green)" }} />
+              <span className="font-mono font-medium text-[11px]" style={{ color: "var(--accent-green)" }}>
                 {message.name || "tool"}
               </span>
+              <ChevronRight size={10} style={{ color: "var(--text-dim)" }} />
             </div>
             <pre
-              className="text-[12px] font-mono whitespace-pre-wrap break-all"
+              className="text-[11px] font-mono whitespace-pre-wrap break-all mt-1.5"
               style={{
                 color: "var(--text-dim)",
                 background: "transparent",
                 border: "none",
                 padding: 0,
                 margin: 0,
-                maxHeight: 200,
+                maxHeight: 160,
                 overflow: "auto",
               }}
             >
@@ -108,22 +107,21 @@ export function MessageCard({ message }: MessageCardProps) {
         </div>
       )}
 
-      {/* System / command response messages */}
+      {/* ── System / command response (centered pill) ── */}
       {isSystem && (
-        <div className="py-2 ml-10">
+        <div className="flex justify-center my-2">
           <div
-            className="rounded-xl px-4 py-3"
+            className="inline-flex items-start gap-2 rounded-xl px-4 py-2.5 max-w-[85%]"
             style={{
               background: "rgba(187, 154, 247, 0.06)",
-              border: "1px solid rgba(187, 154, 247, 0.15)",
+              border: "1px solid rgba(187, 154, 247, 0.12)",
             }}
           >
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <AlertTriangle size={11} style={{ color: "var(--accent-magenta)" }} />
-              <span className="text-[10px] font-medium" style={{ color: "var(--accent-magenta)" }}>
-                System
-              </span>
-            </div>
+            <AlertTriangle
+              size={12}
+              className="shrink-0 mt-0.5"
+              style={{ color: "var(--accent-magenta)" }}
+            />
             <pre
               className="text-xs font-mono whitespace-pre-wrap"
               style={{

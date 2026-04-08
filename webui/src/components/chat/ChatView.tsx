@@ -5,7 +5,14 @@ import { ToolCallCard } from "./ToolCallCard";
 import { StreamingCard } from "./StreamingCard";
 import { ChatInput } from "./ChatInput";
 import { PermissionModal } from "../shared/PermissionModal";
-import { Sparkles, Bot, Slash } from "lucide-react";
+import { Sparkles, Bot } from "lucide-react";
+
+const SUGGESTIONS = [
+  { label: "Explain this code", emoji: "💡" },
+  { label: "Fix a bug", emoji: "🔧" },
+  { label: "Write tests", emoji: "🧪" },
+  { label: "Refactor", emoji: "✨" },
+];
 
 interface ChatViewProps {
   onSend: (text: string) => void;
@@ -30,72 +37,72 @@ export function ChatView({ onSend, onPermission }: ChatViewProps) {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-6 py-6">
           {isEmpty && (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 animate-fade-in">
+            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-5 animate-fade-in select-none">
               <div
-                className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                className="w-14 h-14 rounded-2xl flex items-center justify-center"
                 style={{
                   background: "linear-gradient(135deg, var(--accent-blue), var(--accent-magenta))",
-                  boxShadow: "var(--shadow-glow-blue)",
+                  boxShadow: "0 0 40px rgba(122,162,247,0.2)",
                 }}
               >
-                <Sparkles size={28} color="#fff" />
+                <Sparkles size={24} color="#fff" />
               </div>
               <div className="text-center">
                 <h2
-                  className="text-xl font-semibold mb-2"
-                  style={{ color: "var(--text-primary)", letterSpacing: "-0.02em" }}
+                  className="text-2xl font-bold mb-1.5"
+                  style={{
+                    background: "linear-gradient(135deg, var(--accent-blue), var(--accent-magenta))",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    letterSpacing: "-0.03em",
+                  }}
                 >
-                  SuperHaojun
+                  What can I help with?
                 </h2>
-                <p
-                  className="text-sm max-w-md"
-                  style={{ color: "var(--text-dim)", lineHeight: 1.7 }}
-                >
-                  AI-powered coding assistant. Ask me anything about code,
-                  architecture, debugging, or let me help build your project.
-                </p>
                 {activeModel && (
                   <div
-                    className="inline-flex items-center gap-1.5 mt-3 px-3 py-1 rounded-full text-[11px]"
+                    className="inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full text-[11px]"
                     style={{
                       background: "var(--bg-elevated)",
-                      color: "var(--text-secondary)",
+                      color: "var(--text-dim)",
                       border: "1px solid var(--border-subtle)",
                     }}
                   >
-                    <Bot size={11} style={{ color: "var(--accent-cyan)" }} />
+                    <Bot size={10} />
                     {activeModel.name}
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap justify-center gap-2 mt-2">
-                {["Explain this code", "Fix a bug", "Write tests", "Refactor"].map((text) => (
+              <div className="flex flex-wrap justify-center gap-2 mt-3">
+                {SUGGESTIONS.map(({ label, emoji }) => (
                   <button
-                    key={text}
-                    onClick={() => onSend(text)}
-                    className="px-4 py-2 rounded-xl text-xs font-medium btn-hover"
+                    key={label}
+                    onClick={() => onSend(label)}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-medium transition-all duration-200 hover:scale-[1.02]"
                     style={{
-                      background: "var(--bg-elevated)",
+                      background: "var(--bg-surface)",
                       color: "var(--text-secondary)",
-                      border: "1px solid var(--border)",
+                      border: "1px solid var(--border-subtle)",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "var(--accent-blue)";
+                      e.currentTarget.style.background = "var(--bg-elevated)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = "var(--border-subtle)";
+                      e.currentTarget.style.background = "var(--bg-surface)";
                     }}
                   >
-                    {text}
+                    <span>{emoji}</span>
+                    {label}
                   </button>
                 ))}
-              </div>
-              <div
-                className="flex items-center gap-1.5 text-[11px] mt-1"
-                style={{ color: "var(--text-dim)" }}
-              >
-                <Slash size={10} />
-                Type / for commands
               </div>
             </div>
           )}
 
           {!isEmpty && (
-            <div className="space-y-1">
+            <div className="space-y-0">
               {messages.map((msg) => (
                 <MessageCard key={msg.id} message={msg} />
               ))}
@@ -112,16 +119,16 @@ export function ChatView({ onSend, onPermission }: ChatViewProps) {
 
               {/* Thinking indicator */}
               {isStreaming && !streamingText && Object.keys(toolCalls).length === 0 && (
-                <div className="flex items-start gap-3 py-4 animate-fade-in">
+                <div className="flex items-start gap-2.5 py-4 animate-fade-in">
                   <div
-                    className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                    className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
                     style={{
                       background: "linear-gradient(135deg, var(--accent-cyan), var(--accent-teal))",
                     }}
                   >
-                    <Sparkles size={14} color="#fff" />
+                    <Sparkles size={12} color="#fff" />
                   </div>
-                  <div className="flex items-center gap-1.5 pt-2">
+                  <div className="flex items-center gap-1.5 pt-1.5">
                     <span className="typing-dot" />
                     <span className="typing-dot" />
                     <span className="typing-dot" />

@@ -93,7 +93,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
   const canSend = text.trim() && !disabled;
 
   return (
-    <div className="shrink-0 px-6 pb-4 pt-2">
+    <div className="shrink-0 px-6 pb-5 pt-2">
       <div className="max-w-3xl mx-auto relative">
         {/* Slash command autocomplete */}
         {showSlash && (
@@ -106,19 +106,19 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
         )}
 
         <div
-          className="flex items-end gap-3 rounded-2xl px-4 py-3 transition-all duration-200"
+          className="flex items-end gap-2 rounded-2xl px-4 py-3 transition-all duration-200"
           style={{
             background: "var(--bg-surface)",
             border: "1px solid var(--border)",
-            boxShadow: "var(--shadow-lg)",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderColor = "var(--accent-blue)";
-            e.currentTarget.style.boxShadow = "var(--shadow-glow-blue)";
+            e.currentTarget.style.borderColor = "rgba(122,162,247,0.4)";
+            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(122,162,247,0.08), 0 2px 12px rgba(0,0,0,0.25)";
           }}
           onBlur={(e) => {
             e.currentTarget.style.borderColor = "var(--border)";
-            e.currentTarget.style.boxShadow = "var(--shadow-lg)";
+            e.currentTarget.style.boxShadow = "0 2px 12px rgba(0,0,0,0.25)";
           }}
         >
           <textarea
@@ -126,7 +126,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            placeholder={disabled ? "Generating..." : "Message SuperHaojun... (/ for commands)"}
+            placeholder={disabled ? "Thinking..." : "Ask anything... (/ for commands)"}
             disabled={disabled}
             rows={1}
             className="flex-1 bg-transparent resize-none outline-none text-sm leading-relaxed"
@@ -140,25 +140,24 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           <button
             onClick={handleSend}
             disabled={!canSend}
-            className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all duration-200"
+            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200"
             style={{
               background: canSend
-                ? "linear-gradient(135deg, var(--accent-blue), var(--accent-cyan))"
+                ? "var(--accent-blue)"
                 : "var(--bg-hover)",
               color: canSend ? "#fff" : "var(--text-dim)",
-              boxShadow: canSend ? "var(--shadow-glow-blue)" : "none",
+              opacity: canSend ? 1 : 0.4,
               cursor: canSend ? "pointer" : "default",
-              opacity: canSend ? 1 : 0.5,
             }}
           >
-            <ArrowUp size={16} strokeWidth={2.5} />
+            <ArrowUp size={14} strokeWidth={2.5} />
           </button>
         </div>
         <p
-          className="text-[10px] text-center mt-2"
-          style={{ color: "var(--text-dim)" }}
+          className="text-[10px] text-center mt-1.5 select-none"
+          style={{ color: "var(--text-dim)", opacity: 0.6 }}
         >
-          ⌘+Enter to send · / for commands
+          ⌘+Enter to send
         </p>
       </div>
     </div>

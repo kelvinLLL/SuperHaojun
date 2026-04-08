@@ -8,28 +8,23 @@ interface StreamingCardProps {
 
 export function StreamingCard({ text }: StreamingCardProps) {
   return (
-    <div className="flex items-start gap-3 py-1">
+    <div className="flex items-start gap-2.5 max-w-[85%] py-1">
       <div
-        className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+        className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-1"
         style={{
           background: "linear-gradient(135deg, var(--accent-cyan), var(--accent-teal))",
         }}
       >
-        <Sparkles size={14} color="#fff" />
+        <Sparkles size={12} color="#fff" />
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            SuperHaojun
-          </span>
-          <span
-            className="w-1.5 h-1.5 rounded-full animate-pulse-glow"
-            style={{ background: "var(--accent-cyan)" }}
-          />
-        </div>
         <div className="markdown-body text-sm">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
         </div>
+        <span
+          className="inline-block w-1.5 h-4 rounded-sm ml-0.5 animate-pulse-glow"
+          style={{ background: "var(--accent-cyan)", verticalAlign: "text-bottom" }}
+        />
       </div>
     </div>
   );
