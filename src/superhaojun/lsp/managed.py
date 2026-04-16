@@ -87,6 +87,11 @@ class ManagedLSPClient:
         result = await self._with_recovery(lambda c: c.get_diagnostics(file_path))
         return result if result else []
 
+    def diagnostics_by_file(self) -> dict[str, list[Diagnostic]]:
+        if self._client is None:
+            return {}
+        return self._client.diagnostics_by_file()
+
     async def hover(self, file_path: str, line: int, character: int) -> HoverInfo | None:
         return await self._with_recovery(lambda c: c.hover(file_path, line, character))
 

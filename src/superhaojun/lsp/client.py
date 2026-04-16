@@ -161,6 +161,13 @@ class LSPClient:
         uri = self._path_to_uri(file_path)
         return list(self._diagnostics.get(uri, []))
 
+    def diagnostics_by_file(self) -> dict[str, list[Diagnostic]]:
+        """Return a snapshot of cached diagnostics grouped by file path."""
+        return {
+            uri[7:] if uri.startswith("file://") else uri: list(diags)
+            for uri, diags in self._diagnostics.items()
+        }
+
     async def hover(self, file_path: str, line: int, character: int) -> HoverInfo | None:
         """Get hover information at a position."""
         result = await self._send_request("textDocument/hover", {

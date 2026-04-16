@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from superhaojun.agent import Agent
@@ -12,9 +14,11 @@ from superhaojun.commands import (
 )
 from superhaojun.commands.builtins import (
     ClearCommand, HelpCommand, MessagesCommand,
-    ModelCommand, QuitCommand, ToolsCommand,
+    MemoryCommand, ModelCommand, QuitCommand, ToolsCommand, ExtensionsCommand,
 )
 from superhaojun.config import ModelConfig
+from superhaojun.memory.store import MemoryCategory, MemoryStore
+from superhaojun.prompt.builder import SystemPromptBuilder
 from superhaojun.tools import ToolRegistry, register_builtin_tools
 
 
@@ -76,7 +80,9 @@ class TestCommandRegistry:
         assert len(matches) == len(cmd_registry)
 
     def test_register_builtin_count(self, cmd_registry: CommandRegistry) -> None:
-        assert len(cmd_registry) == 10  # help, clear, compact, quit, exit, memory, messages, model, session, tools
+        assert len(cmd_registry) == 12  # help, clear, compact, quit, exit, memory, messages, model, session, tools, extensions, mcp
+        assert cmd_registry.get("mcp") is not None
+        assert cmd_registry.get("extensions") is not None
 
 
 class TestBuiltinCommands:
@@ -125,3 +131,57 @@ class TestBuiltinCommands:
         assert "Registered tools:" in result
         assert "read_file" in result
         assert "bash" in result
+
+    async def test_memory_add_refreshes_prompt_memory_entry(self, tmp_path: Path, agent: Agent) -> None:
+        memory_store = MemoryStore(storage_dir=tmp_path / "memory")
+        builder = SystemPromptBuilder(working_dir=str(tmp_path))
+        agent.prompt_builder = builder
+        builder.set_memory_text("")
+
+        ctx = CommandContext(agent=agent)
+        ctx.memory_store = memory_store  # type: ignore[attr-defined]
+
+        result = await MemoryCommand().execute("add user Prefers careful refactors", ctx)
+
+        assert "Memory added" in result
+        assert "Prefers careful refactors" in builder.build()
+        assert builder.memory_entry_metadata is not None
+        assert builder.memory_entry_metadata["loaded_entries"]
+
+    async def test_memory_delete_refreshes_prompt_memory_entry(self, tmp_path: Path, agent: Agent) -> None:
+        memory_store = MemoryStore(storage_dir=tmp_path / "memory")
+        real_entry = memory_store.add(MemoryCategory.USER, "Keeps notes short")
+        builder = SystemPromptBuilder(working_dir=str(tmp_path))
+        agent.prompt_builder = builder
+        builder.set_memory_entry(memory_store.build_prompt_entry())
+
+        ctx = CommandContext(agent=agent)
+        ctx.memory_store = memory_store  # type: ignore[attr-defined]
+
+        result = await MemoryCommand().execute(f"delete {real_entry.entry_id}", ctx)
+
+        assert result == "Memory deleted."
+        assert builder.memory_entry_metadata is None or builder.memory_entry_metadata["loaded_entries"] == []
+
+    async def test_extensions_list_and_disable_refresh_prompt(self, tmp_path: Path, agent: Agent) -> None:
+        from superhaojun.extensions.runtime import ExtensionRuntime
+
+        (tmp_path / "SUPERHAOJUN.md").write_text("Use dataclasses.", encoding="utf-8")
+        brand = tmp_path / ".haojun"
+        brand.mkdir()
+
+        runtime = ExtensionRuntime(working_dir=tmp_path, config_path=brand / "extensions.json")
+        builder = SystemPromptBuilder(working_dir=str(tmp_path), extension_runtime=runtime)
+        agent.prompt_builder = builder
+
+        ctx = CommandContext(agent=agent)
+        ctx.extension_runtime = runtime  # type: ignore[attr-defined]
+
+        listed = await ExtensionsCommand().execute("", ctx)
+        extension_id = runtime.list_extensions()[0]["id"]
+        assert "Use dataclasses." in builder.build()
+        disabled = await ExtensionsCommand().execute(f"disable {extension_id}", ctx)
+
+        assert "SUPERHAOJUN.md" in listed
+        assert "disabled" in disabled.lower()
+        assert "Use dataclasses." not in builder.build()

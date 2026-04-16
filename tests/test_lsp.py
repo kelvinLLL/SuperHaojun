@@ -204,6 +204,10 @@ class TestManagedLSPClient:
             await m.start("/workspace")
         assert m.state == LSPState.CRASHED
 
+    def test_diagnostics_by_file_empty(self):
+        m = ManagedLSPClient(command="pyright")
+        assert m.diagnostics_by_file() == {}
+
 
 # ── LSPServerConfig ──
 
@@ -231,10 +235,13 @@ class TestLSPService:
     async def test_start_stop_all(self):
         svc = LSPService()
         svc.add_server(LSPServerConfig("python", "pyright", ["--stdio"]))
-        with patch.object(LSPClient, "start", new_callable=AsyncMock):
+        with patch.object(LSPClient, "start", new_callable=AsyncMock), \
+             patch.object(ManagedLSPClient, "start", new_callable=AsyncMock):
             await svc.start_all("/workspace")
         assert "python" in svc._clients
-        with patch.object(LSPClient, "stop", new_callable=AsyncMock):
+        assert isinstance(svc._clients["python"], ManagedLSPClient)
+        with patch.object(LSPClient, "stop", new_callable=AsyncMock), \
+             patch.object(ManagedLSPClient, "stop", new_callable=AsyncMock):
             await svc.stop_all()
         assert len(svc._clients) == 0
 
@@ -252,6 +259,37 @@ class TestLSPService:
     def test_to_prompt_context_empty(self):
         svc = LSPService()
         assert svc.to_prompt_context() == ""
+
+    async def test_get_all_diagnostics_uses_managed_snapshots(self):
+        svc = LSPService()
+        svc._clients["python"] = ManagedLSPClient(command="pyright")
+        svc._clients["typescript"] = ManagedLSPClient(command="tsserver")
+
+        diag = Diagnostic(file_path="a.py", line=0, character=0, severity=1, message="same", source="test")
+        with patch.object(ManagedLSPClient, "diagnostics_by_file", side_effect=[
+            {"a.py": [diag]},
+            {"a.py": [diag]},
+        ]):
+            diags = await svc.get_all_diagnostics()
+
+        assert len(diags) == 1
+        assert diags[0].message == "same"
+
+    def test_to_prompt_context_uses_registry_summary(self):
+        svc = LSPService()
+        svc._clients["python"] = ManagedLSPClient(command="pyright")
+        svc._clients["typescript"] = ManagedLSPClient(command="tsserver")
+
+        diag = Diagnostic(file_path="a.py", line=0, character=0, severity=1, message="same", source="test")
+        with patch.object(ManagedLSPClient, "diagnostics_by_file", side_effect=[
+            {"a.py": [diag]},
+            {"a.py": [diag]},
+        ]):
+            ctx = svc.to_prompt_context()
+
+        assert ctx.startswith("## LSP Context")
+        assert "## Diagnostics" in ctx
+        assert ctx.count("same") == 1
 
     async def test_hover_no_client(self):
         svc = LSPService()

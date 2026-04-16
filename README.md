@@ -2,6 +2,8 @@
 
 Personal AI coding agent harness — built as a ground-up reimplementation studying Claude Code's architecture.
 
+Active implementation specs now live in `specs/`. Keep `docs/` for architecture analysis, research notes, and longer-form explanations.
+
 ## Prerequisites
 
 - Python 3.12+
@@ -52,6 +54,14 @@ uv run superhaojun
 ```
 
 Starts the interactive REPL. Type `/help` for commands, `Ctrl+C` to exit.
+
+### TUI (rich terminal)
+
+```bash
+uv run superhaojun-tui
+```
+
+Starts the prompt_toolkit + Rich terminal UI through the same shared runtime assembly used by the CLI and WebUI.
 
 ### WebUI (browser)
 
@@ -133,6 +143,7 @@ User-level MCP servers available across all projects.
 
 ```
 superhaojun/
+├── specs/                # Active SDD specs, templates, and doc contracts
 ├── src/superhaojun/
 │   ├── agent.py          # Core agent loop
 │   ├── config.py         # ModelConfig + ModelRegistry
@@ -143,16 +154,19 @@ superhaojun/
 │   ├── lsp/              # Language server client
 │   ├── agents/           # SubAgent + Coordinator
 │   ├── compact/          # Context compaction
+│   ├── extensions/       # Repo-local extension runtime
 │   ├── memory/           # Persistent memory store
 │   ├── session/          # Session persistence (JSONL)
 │   ├── prompt/           # System prompt builder (section registry)
+│   ├── transport/        # Experimental transport helpers
 │   ├── tui/              # Terminal UI (prompt_toolkit + rich)
 │   └── webui/            # FastAPI server + static frontend
 ├── webui/                # React + TypeScript frontend source
 │   └── src/
 ├── models.yaml           # Model profiles (multi-model config)
 ├── .env                  # API keys (gitignored)
-└── docs/                 # Architecture documentation
+├── docs/                 # Architecture documentation and research notes
+└── tests/                # Regression coverage for backend modules
 ```
 
 ---
@@ -164,6 +178,7 @@ superhaojun/
 | `/help` | List all commands |
 | `/clear` | Clear conversation history |
 | `/compact` | Manually trigger context compaction |
+| `/extensions` | List or toggle repo-local extensions |
 | `/memory` | Show memory entries |
 | `/mcp list` | List MCP server status |
 | `/mcp enable <name>` | Enable a MCP server |

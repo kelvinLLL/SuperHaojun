@@ -5,6 +5,23 @@ from __future__ import annotations
 from .base import Command, CommandContext
 
 
+def _refresh_memory_prompt_entry(context: CommandContext) -> None:
+    """Refresh prompt memory entry after memory mutations."""
+    memory_store = getattr(context, "memory_store", None)
+    agent = getattr(context, "agent", None)
+    prompt_builder = getattr(agent, "prompt_builder", None)
+    if memory_store is None or prompt_builder is None:
+        return
+    prompt_builder.set_memory_entry(memory_store.build_prompt_entry())
+
+
+def _invalidate_prompt_builder(context: CommandContext) -> None:
+    agent = getattr(context, "agent", None)
+    prompt_builder = getattr(agent, "prompt_builder", None)
+    if prompt_builder is not None:
+        prompt_builder.invalidate()
+
+
 class HelpCommand(Command):
     @property
     def name(self) -> str:
@@ -272,6 +289,7 @@ class MemoryCommand(Command):
             except ValueError:
                 return f"Unknown category: {cat_str}. Use: user, feedback, project, reference."
             entry = memory_store.add(cat, content)
+            _refresh_memory_prompt_entry(context)
             return f"Memory added [{cat.value}]: {content[:80]}"
 
         if sub == "list":
@@ -304,7 +322,57 @@ class MemoryCommand(Command):
             if not rest:
                 return "Usage: /memory delete <entry_id>"
             if memory_store.delete(rest):
+                _refresh_memory_prompt_entry(context)
                 return "Memory deleted."
             return "Memory entry not found."
 
         return "Usage: /memory <add|list|search|delete> [args]"
+
+
+class ExtensionsCommand(Command):
+    @property
+    def name(self) -> str:
+        return "extensions"
+
+    @property
+    def description(self) -> str:
+        return "List or toggle repo-local extensions"
+
+    async def execute(self, args: str, context: CommandContext) -> str | None:
+        extension_runtime = getattr(context, "extension_runtime", None)
+        if extension_runtime is None:
+            return "No extension runtime configured."
+
+        parts = args.strip().split(None, 1)
+        sub = parts[0] if parts else "list"
+        value = parts[1] if len(parts) > 1 else ""
+
+        if sub in ("", "list"):
+            entries = extension_runtime.list_extensions()
+            if not entries:
+                return "No repo-local extensions loaded."
+            lines = ["Loaded extensions:"]
+            for entry in entries:
+                status = "enabled" if entry["enabled"] else "disabled"
+                lines.append(
+                    f"  {entry['id']}  [{status}]  {entry['kind']}  {entry['source']}"
+                )
+            return "\n".join(lines)
+
+        if sub == "enable":
+            if not value:
+                return "Usage: /extensions enable <id>"
+            if extension_runtime.enable(value):
+                _invalidate_prompt_builder(context)
+                return f"Extension enabled: {value}"
+            return f"Extension not found: {value}"
+
+        if sub == "disable":
+            if not value:
+                return "Usage: /extensions disable <id>"
+            if extension_runtime.disable(value):
+                _invalidate_prompt_builder(context)
+                return f"Extension disabled: {value}"
+            return f"Extension not found: {value}"
+
+        return "Usage: /extensions [list|enable|disable] [id]"

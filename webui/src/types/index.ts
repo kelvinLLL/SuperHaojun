@@ -7,7 +7,17 @@ export interface ChatMessageData {
   tool_calls?: ToolCallData[];
   tool_call_id?: string;
   name?: string;
-  timestamp: number;
+  reasoning_details?: unknown;
+  timestamp?: number;
+}
+
+export interface ServerChatMessage {
+  role: "user" | "assistant" | "tool" | "system";
+  content: string | null;
+  tool_calls?: ToolCallData[];
+  tool_call_id?: string;
+  name?: string;
+  reasoning_details?: unknown;
 }
 
 export interface ToolCallData {
@@ -76,6 +86,28 @@ export interface TokenUsage {
   compaction_count: number;
 }
 
+export interface RuntimeState {
+  turn_index: number;
+  phase: string;
+  model_id: string;
+  finish_reason: string | null;
+  text_chunks: string[];
+  reasoning_chunks: string[];
+  buffered_tool_calls: Array<Record<string, string>>;
+  tool_statuses: Array<Record<string, string | null>>;
+  message_count: number;
+  estimated_tokens: number;
+  current_turn_text_tokens: number;
+  current_turn_reasoning_tokens: number;
+  compaction_pending: boolean;
+  compaction_count: number;
+  last_compaction: Record<string, number> | null;
+  active: boolean;
+  started_at: number | null;
+  ended_at: number | null;
+  last_error: string | null;
+}
+
 export interface AppConfig {
   model_id: string;
   base_url: string;
@@ -98,7 +130,8 @@ export interface CommandInfo {
 
 /* WebSocket message types from server */
 export type WSMessage =
-  | { type: "init"; tools: ToolInfo[]; messages: any[]; token_usage: TokenUsage }
+  | { type: "init"; tools: ToolInfo[]; messages: ServerChatMessage[]; token_usage: TokenUsage; runtime: RuntimeState }
+  | { type: "runtime_state"; runtime: RuntimeState }
   | { type: "text_delta"; text: string; id: string }
   | { type: "tool_call_start"; tool_call_id: string; tool_name: string; arguments: Record<string, any>; id: string }
   | { type: "tool_call_end"; tool_call_id: string; tool_name: string; result: string; id: string }

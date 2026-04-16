@@ -52,6 +52,27 @@ class TestSubAgent:
         assert isinstance(result, SubAgentResult)
         assert result.success is True
 
+    async def test_run_reports_turns_used_from_agent_runtime(self):
+        class FakeTurnRuntime:
+            def __init__(self) -> None:
+                self.turn_index = 0
+
+        class FakeAgent:
+            def __init__(self, **kwargs):
+                self.turn_runtime = FakeTurnRuntime()
+
+            async def handle_user_message(self, user_input: str) -> None:
+                self.turn_runtime.turn_index = 3
+
+            async def close(self) -> None:
+                return None
+
+        sub = SubAgent(config=_config())
+        with patch("superhaojun.agent.Agent", FakeAgent):
+            result = await sub.run("test task")
+
+        assert result.turns_used == 3
+
     async def test_run_with_progress(self):
         collected = []
         sub = SubAgent(config=_config(), on_progress=lambda t: collected.append(t))

@@ -9,24 +9,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from pathlib import Path
 
-from .agent import Agent
 from .bus import MessageBus
-from .commands import CommandContext, CommandRegistry, register_builtin_commands
-from .config import load_config
-from .constants import BRAND_DIR
-from .hooks.config import HookRegistry
-from .hooks.runner import HookRunner
 from .messages import (
     AgentEnd, AgentStart, Error,
     PermissionRequest, PermissionResponse,
     TextDelta, ToolCallEnd, ToolCallStart,
 )
-from .memory.store import MemoryStore
-from .prompt.builder import SystemPromptBuilder
-from .session.manager import SessionManager
-from .tools import ToolRegistry, register_builtin_tools
+from .runtime import AppRuntime, build_runtime
 
 CYAN = "\033[36m"
 YELLOW = "\033[33m"
@@ -88,12 +78,10 @@ def _register_render_handlers(bus: MessageBus) -> None:
     bus.on("permission_request", on_permission_request)
 
 
-async def repl(agent: Agent, cmd_registry: CommandRegistry, session_manager: SessionManager | None = None, memory_store: MemoryStore | None = None) -> None:
+async def repl(runtime: AppRuntime) -> None:
     loop = asyncio.get_event_loop()
-    cmd_ctx = CommandContext(agent=agent)
-    cmd_ctx.command_registry = cmd_registry  # type: ignore[attr-defined]
-    cmd_ctx.session_manager = session_manager  # type: ignore[attr-defined]
-    cmd_ctx.memory_store = memory_store  # type: ignore[attr-defined]
+    agent = runtime.agent
+    cmd_registry = runtime.command_registry
 
     print(f"\n🤖 SuperHaojun Agent")
     print(f"   Model: {agent.config.model_id} @ {agent.config.base_url}")
@@ -128,6 +116,7 @@ async def repl(agent: Agent, cmd_registry: CommandRegistry, session_manager: Ses
                     print(f"Unknown command: /{cmd_name}. Type /help.")
                 continue
 
+            cmd_ctx = runtime.build_command_context()
             output = await cmd.execute(cmd_args, cmd_ctx)
             if output:
                 print(output)
@@ -144,35 +133,10 @@ async def repl(agent: Agent, cmd_registry: CommandRegistry, session_manager: Ses
 
 
 def main() -> None:
-    config = load_config()
-    bus = MessageBus()
-    _register_render_handlers(bus)
-    tool_registry = ToolRegistry()
-    register_builtin_tools(tool_registry)
-    cmd_registry = CommandRegistry()
-    register_builtin_commands(cmd_registry)
-
-    working_dir = os.getcwd()
-    tool_summaries = [
-        {"name": t["function"]["name"], "description": t["function"].get("description", "")}
-        for t in tool_registry.to_openai_tools()
-    ]
-
-    brand_root = Path(working_dir) / BRAND_DIR
-    session_manager = SessionManager(storage_dir=brand_root / "sessions")
-    memory_store = MemoryStore(storage_dir=brand_root / "memory")
-
-    hook_registry = HookRegistry.load(brand_root / "hooks.json")
-    hook_runner = HookRunner(registry=hook_registry, working_dir=working_dir) if hook_registry.list_hooks() else None
-
-    prompt_builder = SystemPromptBuilder(
-        working_dir=working_dir,
-        tool_summaries=tool_summaries,
-        memory_text=memory_store.to_prompt_text(),
-    )
-
-    agent = Agent(config=config, bus=bus, registry=tool_registry, prompt_builder=prompt_builder, hook_runner=hook_runner)
+    runtime = build_runtime(working_dir=os.getcwd())
+    _register_render_handlers(runtime.bus)
     try:
-        asyncio.run(repl(agent, cmd_registry, session_manager, memory_store))
+        asyncio.run(runtime.startup())
+        asyncio.run(repl(runtime))
     finally:
-        asyncio.run(agent.close())
+        asyncio.run(runtime.shutdown())

@@ -19,9 +19,9 @@ from prompt_toolkit.formatted_text import HTML
 from rich.console import Console
 
 from ..agent import Agent
-from ..bus import MessageBus
 from ..commands import CommandContext, CommandRegistry
 from ..constants import BRAND_DIR
+from ..runtime import build_command_context
 from .renderer import TUIRenderer, THEME
 
 
@@ -46,12 +46,14 @@ class TUIApp:
         cmd_registry: CommandRegistry,
         console: Console | None = None,
         history_file: str | None = None,
+        command_context: CommandContext | None = None,
     ) -> None:
         self.agent = agent
         self.cmd_registry = cmd_registry
         self.console = console or Console(theme=THEME)
         self.renderer = TUIRenderer(console=self.console)
         self.renderer.register(agent.bus)
+        self.command_context = command_context
 
         # Input session with history
         hf = history_file or str(Path.home() / BRAND_DIR / "input_history")
@@ -62,6 +64,14 @@ class TUIApp:
         )
         self._running = True
 
+    def _command_context(self) -> CommandContext:
+        if self.command_context is not None:
+            return self.command_context
+        return build_command_context(
+            self.agent,
+            command_registry=self.cmd_registry,
+        )
+
     async def run(self) -> None:
         """Main REPL loop with rich rendering."""
         self.renderer.print_welcome(
@@ -70,9 +80,6 @@ class TUIApp:
             tool_count=len(self.agent.registry),
             cmd_count=len(self.cmd_registry),
         )
-
-        cmd_ctx = CommandContext(agent=self.agent)
-        cmd_ctx.command_registry = self.cmd_registry  # type: ignore[attr-defined]
 
         while self._running:
             try:
@@ -97,7 +104,7 @@ class TUIApp:
 
                 cmd = self.cmd_registry.get(cmd_name)
                 if cmd:
-                    result = await cmd.execute(cmd_ctx, cmd_args)
+                    result = await cmd.execute(cmd_args, self._command_context())
                     if result:
                         self.console.print(result)
                 else:

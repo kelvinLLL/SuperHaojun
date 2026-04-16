@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 from rich.console import Console
 
+from superhaojun.agent import Agent
 from superhaojun.bus import MessageBus
+from superhaojun.commands import Command, CommandContext, CommandRegistry
+from superhaojun.config import ModelConfig
 from superhaojun.messages import (
     AgentEnd, AgentStart, Error,
     PermissionRequest, TextDelta,
     ToolCallEnd, ToolCallStart, TurnEnd, TurnStart,
 )
+from superhaojun.tui.app import TUIApp
 from superhaojun.tui.renderer import TUIRenderer, _format_args, _looks_like_code
 
 
@@ -171,3 +176,103 @@ class TestTUIRenderer:
         renderer = TUIRenderer(console=self._make_console())
         renderer._on_turn_start(TurnStart())
         renderer._on_turn_end(TurnEnd(finish_reason="stop"))
+
+
+class _SpyCommand(Command):
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, object]] = []
+
+    @property
+    def name(self) -> str:
+        return "spy"
+
+    @property
+    def description(self) -> str:
+        return "Spy command"
+
+    async def execute(self, args: str, context: CommandContext) -> str | None:
+        self.calls.append((args, context))
+        return None
+
+
+class TestTUIApp:
+    def _make_console(self) -> Console:
+        return Console(file=StringIO(), theme=None, force_terminal=True, width=120)
+
+    def _make_agent(self) -> Agent:
+        return Agent(
+            config=ModelConfig(
+                provider="openai",
+                model_id="gpt-4o",
+                base_url="https://api.openai.com/v1",
+                api_key="sk-test",
+            ),
+            bus=MessageBus(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_command_execute_receives_args_before_context(self, tmp_path: Path) -> None:
+        spy = _SpyCommand()
+        registry = CommandRegistry()
+        registry.register(spy)
+
+        app = TUIApp(
+            agent=self._make_agent(),
+            cmd_registry=registry,
+            console=self._make_console(),
+            history_file=str(tmp_path / "history.txt"),
+        )
+        app._get_input = AsyncMock(side_effect=["/spy hello world", EOFError()])
+
+        await app.run()
+
+        assert spy.calls
+        assert spy.calls[0][0] == "hello world"
+        assert isinstance(spy.calls[0][1], CommandContext)
+
+    @pytest.mark.asyncio
+    async def test_uses_provided_command_context(self, tmp_path: Path) -> None:
+        spy = _SpyCommand()
+        registry = CommandRegistry()
+        registry.register(spy)
+        agent = self._make_agent()
+        context = CommandContext(agent=agent)
+
+        app = TUIApp(
+            agent=agent,
+            cmd_registry=registry,
+            console=self._make_console(),
+            history_file=str(tmp_path / "history.txt"),
+            command_context=context,
+        )
+        app._get_input = AsyncMock(side_effect=["/spy hi", EOFError()])
+
+        await app.run()
+
+        assert spy.calls
+        assert spy.calls[0][1] is context
+
+
+class TestTUILauncher:
+    @pytest.mark.asyncio
+    async def test_run_tui_uses_runtime_lifecycle(self) -> None:
+        from superhaojun.tui.launcher import run_tui
+
+        runtime = MagicMock()
+        runtime.startup = AsyncMock()
+        runtime.shutdown = AsyncMock()
+        runtime.agent = MagicMock()
+        runtime.command_registry = MagicMock()
+        runtime.build_command_context.return_value = CommandContext(agent=runtime.agent)
+
+        app = MagicMock()
+        app.run = AsyncMock()
+
+        with patch("superhaojun.tui.launcher.TUIApp", return_value=app) as tui_app_cls:
+            await run_tui(runtime)
+
+        runtime.startup.assert_awaited_once()
+        runtime.shutdown.assert_awaited_once()
+        runtime.build_command_context.assert_called_once_with()
+        tui_app_cls.assert_called_once()
+        app.run.assert_awaited_once()

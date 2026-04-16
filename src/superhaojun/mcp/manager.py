@@ -15,7 +15,7 @@ from typing import Any
 
 from .adapter import MCPToolAdapter
 from .client import MCPClient, MCPToolInfo
-from .config import MCPServerConfig, MCPServerStatus
+from .config import MCPServerApproval, MCPServerConfig, MCPServerStatus
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 class MCPServerState:
     """Runtime state for one MCP server."""
     config: MCPServerConfig
+    approval: MCPServerApproval = MCPServerApproval.PENDING
     status: MCPServerStatus = MCPServerStatus.STOPPED
     client: MCPClient | None = None
     tools: list[MCPToolInfo] = field(default_factory=list)
@@ -49,12 +50,18 @@ class MCPManager:
         for cfg in configs:
             if cfg.name not in self._servers:
                 status = MCPServerStatus.DISABLED if not cfg.enabled else MCPServerStatus.STOPPED
-                self._servers[cfg.name] = MCPServerState(config=cfg, status=status)
+                self._servers[cfg.name] = MCPServerState(
+                    config=cfg,
+                    approval=cfg.effective_approval,
+                    status=status,
+                )
 
     async def start_all(self) -> None:
         """Start all enabled servers."""
         for name, state in self._servers.items():
             if state.config.enabled and state.status == MCPServerStatus.STOPPED:
+                if not self._can_start(state):
+                    continue
                 await self._start_server(name)
 
     async def stop_all(self) -> None:
@@ -69,6 +76,8 @@ class MCPManager:
             return False
         if state.status == MCPServerStatus.RUNNING:
             return True
+        if not self._can_start(state):
+            return False
         state.status = MCPServerStatus.STOPPED
         await self._start_server(name)
         return state.status == MCPServerStatus.RUNNING
@@ -87,10 +96,48 @@ class MCPManager:
         state = self._servers.get(name)
         if not state:
             return False
+        if not self._can_start(state):
+            return False
         await self._stop_server(name)
         state.status = MCPServerStatus.STOPPED
         await self._start_server(name)
         return state.status == MCPServerStatus.RUNNING
+
+    async def approve(self, name: str) -> bool:
+        """Mark a server as approved without implicitly starting it."""
+        return await self.set_approval(name, MCPServerApproval.APPROVED)
+
+    async def deny(self, name: str) -> bool:
+        """Mark a server as denied and stop it if it is running."""
+        return await self.set_approval(name, MCPServerApproval.DENIED)
+
+    async def set_approval(self, name: str, approval: MCPServerApproval) -> bool:
+        """Update a server approval state and keep the config object in sync."""
+        state = self._servers.get(name)
+        if not state:
+            return False
+        was_disabled = state.status == MCPServerStatus.DISABLED
+        if approval != MCPServerApproval.APPROVED and state.client is not None:
+            await self._stop_server(name)
+
+        state.approval = approval
+        state.config = state.config.with_approval(approval)
+
+        if approval == MCPServerApproval.APPROVED:
+            if state.error in {
+                "Approval required before startup.",
+                "Server approval denied.",
+            }:
+                state.error = ""
+            if state.status != MCPServerStatus.DISABLED and state.client is None:
+                state.status = MCPServerStatus.STOPPED
+        elif approval == MCPServerApproval.PENDING:
+            state.error = "Approval required before startup."
+            state.status = MCPServerStatus.DISABLED if was_disabled else MCPServerStatus.STOPPED
+        else:
+            state.error = "Server approval denied."
+            state.status = MCPServerStatus.DISABLED if was_disabled else MCPServerStatus.STOPPED
+        return True
 
     def get_status(self) -> list[dict[str, str]]:
         """Get status of all servers (for /mcp list and WebUI)."""
@@ -98,6 +145,7 @@ class MCPManager:
             {
                 "name": name,
                 "status": state.status.value,
+                "approval": state.approval.value,
                 "transport": state.config.transport,
                 "tools_count": str(len(state.tools)),
                 "error": state.error,
@@ -118,6 +166,16 @@ class MCPManager:
             if state.status == MCPServerStatus.RUNNING:
                 tools.extend(state.tools)
         return tools
+
+    def _can_start(self, state: MCPServerState) -> bool:
+        if state.approval == MCPServerApproval.APPROVED:
+            state.error = ""
+            return True
+        if state.approval == MCPServerApproval.DENIED:
+            state.error = "Server approval denied."
+            return False
+        state.error = "Approval required before startup."
+        return False
 
     # --- Internal ---
 

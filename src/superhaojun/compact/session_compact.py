@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from .prompts import SESSION_SUMMARY_PROMPT
 
 if TYPE_CHECKING:
-    from ..agent import ChatMessage
+    from ..conversation import ChatMessage
 
 
 def _messages_to_text(messages: list[ChatMessage]) -> str:

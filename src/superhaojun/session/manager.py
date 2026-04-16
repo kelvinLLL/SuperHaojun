@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, TextIO
 from uuid import uuid4
 
-from ..agent import ChatMessage
+from ..conversation import ChatMessage
 
 
 @dataclass(frozen=True)
@@ -30,24 +30,13 @@ class SessionInfo:
 
 
 def _message_to_dict(msg: ChatMessage) -> dict[str, Any]:
-    return {
-        "type": "message",
-        "role": msg.role,
-        "content": msg.content,
-        "tool_calls": msg.tool_calls,
-        "tool_call_id": msg.tool_call_id,
-        "name": msg.name,
-    }
+    data = msg.to_dict()
+    data["type"] = "message"
+    return data
 
 
 def _message_from_dict(data: dict[str, Any]) -> ChatMessage:
-    return ChatMessage(
-        role=data["role"],
-        content=data.get("content"),
-        tool_calls=data.get("tool_calls"),
-        tool_call_id=data.get("tool_call_id"),
-        name=data.get("name"),
-    )
+    return ChatMessage.from_dict(data)
 
 
 class SessionWriter:

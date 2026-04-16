@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from .prompts import COMPACTION_USER_PROMPT
 
 if TYPE_CHECKING:
-    from ..agent import ChatMessage
+    from ..conversation import ChatMessage
 
 
 def estimate_tokens(text: str) -> int:
@@ -56,7 +56,7 @@ class CompactionResult:
 
         Caller appends preserved messages after this.
         """
-        from ..agent import ChatMessage
+        from ..conversation import ChatMessage
         result: list[ChatMessage] = []
         if self.summary:
             result.append(ChatMessage(

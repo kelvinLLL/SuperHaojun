@@ -22,12 +22,31 @@ class ProjectInstructionsSection(PromptSection):
         return True
 
     def build(self, ctx: PromptContext) -> str | None:
+        if ctx.extensions:
+            contents = _render_extensions(ctx.extensions)
+            if not contents:
+                return None
+            return "## Repo Extensions\n\n" + "\n\n".join(contents)
         if not ctx.working_dir:
             return None
         contents = _discover_instructions(ctx.working_dir)
         if not contents:
             return None
         return "## Project Instructions\n\n" + "\n\n".join(contents)
+
+
+def _render_extensions(extensions: list[dict[str, object]]) -> list[str]:
+    contents: list[str] = []
+    for entry in extensions:
+        if not entry.get("enabled") or not entry.get("prompt_enabled"):
+            continue
+        prompt_text = str(entry.get("prompt_text") or "").strip()
+        if not prompt_text:
+            continue
+        source = str(entry.get("source") or entry.get("name") or "extension")
+        kind = str(entry.get("kind") or "extension")
+        contents.append(f"### {source} ({kind})\n{prompt_text}")
+    return contents
 
 
 def _discover_instructions(working_dir: str) -> list[str]:

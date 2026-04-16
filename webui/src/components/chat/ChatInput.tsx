@@ -1,15 +1,17 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { usePanelStore } from "@/stores";
 import { SlashMenu } from "./SlashMenu";
 import type { CommandInfo } from "@/types";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
+  onInterrupt?: () => void;
+  showInterrupt?: boolean;
   disabled?: boolean;
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, onInterrupt, showInterrupt = false, disabled }: ChatInputProps) {
   const [text, setText] = useState("");
   const [showSlash, setShowSlash] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
@@ -140,21 +142,38 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
               maxHeight: "200px",
             }}
           />
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200"
-            style={{
-              background: canSend
-                ? "var(--accent-blue)"
-                : "var(--bg-hover)",
-              color: canSend ? "#fff" : "var(--text-dim)",
-              opacity: canSend ? 1 : 0.4,
-              cursor: canSend ? "pointer" : "default",
-            }}
-          >
-            <ArrowUp size={14} strokeWidth={2.5} />
-          </button>
+          {showInterrupt && onInterrupt ? (
+            <button
+              onClick={onInterrupt}
+              className="px-3 h-8 rounded-lg flex items-center justify-center gap-1.5 shrink-0 transition-all duration-200"
+              style={{
+                background: "rgba(247,118,142,0.12)",
+                color: "var(--accent-red, #f7768e)",
+                border: "1px solid rgba(247,118,142,0.2)",
+                cursor: "pointer",
+              }}
+              title="Interrupt"
+            >
+              <Square size={11} fill="currentColor" strokeWidth={2.5} />
+              <span className="text-[11px] font-medium">Stop</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!canSend}
+              className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all duration-200"
+              style={{
+                background: canSend
+                  ? "var(--accent-blue)"
+                  : "var(--bg-hover)",
+                color: canSend ? "#fff" : "var(--text-dim)",
+                opacity: canSend ? 1 : 0.4,
+                cursor: canSend ? "pointer" : "default",
+              }}
+            >
+              <ArrowUp size={14} strokeWidth={2.5} />
+            </button>
+          )}
         </div>
         <p
           className="text-[10px] text-center mt-1.5 select-none"

@@ -17,9 +17,10 @@ const SUGGESTIONS = [
 interface ChatViewProps {
   onSend: (text: string) => void;
   onPermission: (toolCallId: string, granted: boolean) => void;
+  onInterrupt: () => void;
 }
 
-export function ChatView({ onSend, onPermission }: ChatViewProps) {
+export function ChatView({ onSend, onPermission, onInterrupt }: ChatViewProps) {
   const { messages, streamingText, isStreaming, toolCalls, permissionRequest } = useChatStore();
   const models = usePanelStore((s) => s.models);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -143,7 +144,12 @@ export function ChatView({ onSend, onPermission }: ChatViewProps) {
       </div>
 
       {/* Input */}
-      <ChatInput onSend={onSend} disabled={isStreaming} />
+      <ChatInput
+        onSend={onSend}
+        onInterrupt={onInterrupt}
+        showInterrupt={isStreaming}
+        disabled={isStreaming}
+      />
 
       {/* Permission modal */}
       {permissionRequest && (

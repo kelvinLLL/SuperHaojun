@@ -72,7 +72,7 @@ export const useChatStore = create<ChatState>((set) => ({
     set((s) => ({ streamingText: s.streamingText + text })),
 
   startStreaming: () =>
-    set({ streamingText: "", isStreaming: true, toolCalls: {} }),
+    set({ streamingText: "", isStreaming: true, toolCalls: {}, permissionRequest: null }),
 
   endStreaming: () =>
     set((s) => {
@@ -87,7 +87,12 @@ export const useChatStore = create<ChatState>((set) => ({
             },
           ]
         : s.messages;
-      return { messages: msgs, streamingText: "", isStreaming: false };
+      return {
+        messages: msgs,
+        streamingText: "",
+        isStreaming: false,
+        permissionRequest: null,
+      };
     }),
 
   startToolCall: (tc) =>

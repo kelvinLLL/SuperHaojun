@@ -10,7 +10,7 @@ import { SettingsView } from "@/components/settings/SettingsView";
 
 function App() {
   const { activeTab, sidebarOpen } = usePanelStore();
-  const { sendMessage, respondPermission } = useWebSocket();
+  const { sendMessage, respondPermission, interrupt } = useWebSocket();
 
   return (
     <div className="h-full flex flex-col" style={{ background: "var(--bg-primary)" }}>
@@ -18,7 +18,11 @@ function App() {
       <div className="flex flex-1 overflow-hidden">
         <main className="flex-1 overflow-hidden">
           {activeTab === "chat" && (
-            <ChatView onSend={sendMessage} onPermission={respondPermission} />
+            <ChatView
+              onSend={sendMessage}
+              onPermission={respondPermission}
+              onInterrupt={interrupt}
+            />
           )}
           {activeTab === "messages" && <MessagesView />}
           {activeTab === "tools" && <ToolsView />}

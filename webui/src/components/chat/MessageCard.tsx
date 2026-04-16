@@ -13,10 +13,12 @@ export function MessageCard({ message }: MessageCardProps) {
   const isTool = message.role === "tool";
   const isSystem = message.role === "system";
 
-  const time = new Date(message.timestamp).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const time = message.timestamp
+    ? new Date(message.timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
 
   return (
     <div className="animate-slide-up" style={{ marginTop: isUser ? 20 : 6, marginBottom: 2 }}>
@@ -36,12 +38,14 @@ export function MessageCard({ message }: MessageCardProps) {
             >
               {message.content}
             </div>
-            <div
-              className="text-[10px] text-right mt-1 mr-1"
-              style={{ color: "var(--text-dim)" }}
-            >
-              {time}
-            </div>
+            {time && (
+              <div
+                className="text-[10px] text-right mt-1 mr-1"
+                style={{ color: "var(--text-dim)" }}
+              >
+                {time}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -65,9 +69,11 @@ export function MessageCard({ message }: MessageCardProps) {
                 </ReactMarkdown>
               </div>
             )}
-            <div className="text-[10px] mt-1" style={{ color: "var(--text-dim)" }}>
-              {time}
-            </div>
+            {time && (
+              <div className="text-[10px] mt-1" style={{ color: "var(--text-dim)" }}>
+                {time}
+              </div>
+            )}
           </div>
         </div>
       )}

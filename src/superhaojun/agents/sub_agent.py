@@ -77,6 +77,7 @@ class SubAgent:
 
         try:
             await agent.handle_user_message(task)
+            self._turns_count = agent.turn_runtime.turn_index
             return SubAgentResult(
                 output="".join(self._collected_text),
                 tool_calls_made=self._tool_calls_count,
@@ -84,6 +85,7 @@ class SubAgent:
                 success=True,
             )
         except Exception as exc:
+            self._turns_count = agent.turn_runtime.turn_index
             return SubAgentResult(
                 output="".join(self._collected_text),
                 tool_calls_made=self._tool_calls_count,
