@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import httpx
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,35 +12,18 @@ from openai.types.chat import ChatCompletionMessageParam
 from .bus import MessageBus
 from .compact.compactor import ContextCompactor
 from .config import ModelConfig, make_permissive_ssl_context
+from .conversation import ChatMessage, ConversationState
 from .hooks.config import HookEvent
 from .hooks.runner import HookRunner
 from .messages import (
     AgentEnd, AgentStart, Error,
-    PermissionRequest, TextDelta,
-    ToolCallEnd, ToolCallStart, TurnEnd, TurnStart,
+    TextDelta, TurnEnd, TurnStart,
 )
-from .permissions import Decision, PermissionChecker
+from .permissions import PermissionChecker
 from .prompt.builder import SystemPromptBuilder
+from .tool_orchestration import ToolCallInfo, ToolOrchestrator
 from .tools.registry import ToolRegistry
-
-
-@dataclass
-class ChatMessage:
-    """A single message in the conversation history."""
-    role: str
-    content: str | None = None
-    tool_calls: list[dict[str, Any]] | None = None
-    tool_call_id: str | None = None
-    name: str | None = None
-    reasoning_details: Any = None
-
-
-@dataclass
-class ToolCallInfo:
-    """Accumulated tool call from a streamed response."""
-    id: str
-    name: str
-    arguments: str
+from .turn_runtime import TurnRuntimeState
 
 
 @dataclass
@@ -62,8 +43,23 @@ class Agent:
     compactor: ContextCompactor | None = None
     hook_runner: HookRunner | None = None
     system_prompt: str = ""
-    messages: list[ChatMessage] = field(default_factory=list)
+    conversation: ConversationState = field(default_factory=ConversationState)
+    turn_runtime: TurnRuntimeState = field(default_factory=TurnRuntimeState)
     _client: AsyncOpenAI | None = field(default=None, repr=False)
+    tool_orchestrator: ToolOrchestrator = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.tool_orchestrator = ToolOrchestrator(
+            bus=self.bus,
+            registry=self.registry,
+            permission_checker=self.permission_checker,
+            hook_runner=self.hook_runner,
+            status_callback=self.turn_runtime.mark_tool_status,
+        )
+
+    @property
+    def messages(self) -> list[ChatMessage]:
+        return self.conversation.messages
 
     @property
     def client(self) -> AsyncOpenAI:
@@ -78,7 +74,12 @@ class Agent:
         return self._client
 
     def _build_messages(self) -> list[ChatCompletionMessageParam]:
-        prompt = self.prompt_builder.build() if self.prompt_builder else self.system_prompt
+        if self.prompt_builder:
+            prompt = self.prompt_builder.build()
+            self.turn_runtime.set_memory_entry(self.prompt_builder.memory_entry_metadata)
+        else:
+            prompt = self.system_prompt
+            self.turn_runtime.set_memory_entry(None)
         msgs: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": prompt},
         ]
@@ -118,9 +119,11 @@ class Agent:
                 user_input = agg.updated_input["input"]
 
         self.messages.append(ChatMessage(role="user", content=user_input))
+        self._refresh_turn_runtime_metrics()
         await self.bus.emit(AgentStart())
 
         while True:
+            self.turn_runtime.start_turn(model_id=self.config.model_id)
             await self.bus.emit(TurnStart())
 
             # Build API kwargs dynamically to avoid NOT_GIVEN sentinel issues
@@ -154,11 +157,14 @@ class Agent:
                 delta = choice.delta
 
                 # Capture reasoning content (OpenRouter extended field)
-                if delta and hasattr(delta, "reasoning") and delta.reasoning:
-                    reasoning_chunks.append(delta.reasoning)
+                reasoning_delta = getattr(delta, "reasoning", None) if delta else None
+                if isinstance(reasoning_delta, str) and reasoning_delta:
+                    reasoning_chunks.append(reasoning_delta)
+                    self.turn_runtime.record_reasoning_delta(reasoning_delta)
 
                 if delta and delta.content:
                     text_chunks.append(delta.content)
+                    self.turn_runtime.record_text_delta(delta.content)
                     await self.bus.emit(TextDelta(text=delta.content))
 
                 if delta and delta.tool_calls:
@@ -179,11 +185,18 @@ class Agent:
                                     existing.name += tc_delta.function.name
                                 if tc_delta.function.arguments:
                                     existing.arguments += tc_delta.function.arguments
+                        self.turn_runtime.set_buffered_tool_calls(
+                            [tool_calls_buf[i] for i in sorted(tool_calls_buf)]
+                        )
 
+            self.turn_runtime.finish_reason = finish_reason or "stop"
             await self.bus.emit(TurnEnd(finish_reason=finish_reason or "stop"))
 
             if finish_reason == "tool_calls" and tool_calls_buf:
                 sorted_calls = [tool_calls_buf[i] for i in sorted(tool_calls_buf)]
+                self.turn_runtime.set_buffered_tool_calls(sorted_calls)
+                self.turn_runtime.set_tool_queue(sorted_calls)
+                self.turn_runtime.enter_tool_phase(finish_reason=finish_reason)
 
                 self.messages.append(ChatMessage(
                     role="assistant",
@@ -197,6 +210,7 @@ class Agent:
                         for tc in sorted_calls
                     ],
                 ))
+                self._refresh_turn_runtime_metrics()
 
                 await self._execute_tool_calls(sorted_calls)
                 continue
@@ -206,6 +220,8 @@ class Agent:
                 content="".join(text_chunks),
                 reasoning_details="".join(reasoning_chunks) if reasoning_chunks else None,
             ))
+            self._refresh_turn_runtime_metrics()
+            self.turn_runtime.complete(finish_reason=finish_reason or "stop")
             break
 
         # Hook: STOP — allows hooks to inspect/augment final response
@@ -217,6 +233,7 @@ class Agent:
             if agg.additional_contexts:
                 ctx_text = "\n".join(agg.additional_contexts)
                 self.messages.append(ChatMessage(role="system", content=f"[Hook context] {ctx_text}"))
+                self._refresh_turn_runtime_metrics()
 
         await self.bus.emit(AgentEnd())
 
@@ -231,103 +248,15 @@ class Agent:
                 await self.hook_runner.run_hooks(HookEvent.POST_COMPACT)
 
     async def _execute_tool_calls(self, tool_calls: list[ToolCallInfo]) -> None:
-        """Execute tool calls with concurrent/sequential strategy."""
-        concurrent: list[ToolCallInfo] = []
-        sequential: list[ToolCallInfo] = []
-
-        for tc in tool_calls:
-            tool = self.registry.get(tc.name)
-            if tool and tool.is_concurrent_safe:
-                concurrent.append(tc)
-            else:
-                sequential.append(tc)
-
-        if concurrent:
-            results = await asyncio.gather(
-                *(self._run_one_tool(tc) for tc in concurrent),
-                return_exceptions=True,
-            )
-            for tc, result_or_exc in zip(concurrent, results):
-                self._append_tool_result(tc, result_or_exc)
-
-        for tc in sequential:
-            result = await self._run_one_tool(tc)
-            self._append_tool_result(tc, result)
+        """Execute tool calls through the shared orchestrator."""
+        results = await self.tool_orchestrator.execute_tool_calls(tool_calls)
+        for result in results:
+            self.messages.append(result.to_message())
+            self._refresh_turn_runtime_metrics()
 
     async def _run_one_tool(self, tc: ToolCallInfo) -> str:
-        """Run a tool with permission checking. Emits messages via bus."""
-        tool = self.registry.get(tc.name)
-        if tool is None:
-            return f"Error: unknown tool '{tc.name}'"
-
-        try:
-            kwargs = json.loads(tc.arguments) if tc.arguments else {}
-        except json.JSONDecodeError as exc:
-            return f"Error: invalid tool arguments: {exc}"
-
-        # Permission check
-        decision = self.permission_checker.check(tc.name, tool.risk_level)
-        if decision == Decision.DENY:
-            return f"Permission denied for tool '{tc.name}'"
-        if decision == Decision.ASK:
-            # Set up waiter BEFORE emitting request (so handler can respond)
-            future = self.bus.expect("permission_response", match_id=tc.id)
-            await self.bus.emit(PermissionRequest(
-                tool_call_id=tc.id, tool_name=tc.name,
-                arguments=kwargs, risk_level=tool.risk_level,
-            ))
-            response = await future
-            if not response.granted:
-                return f"Permission denied for tool '{tc.name}'"
-
-        await self.bus.emit(ToolCallStart(
-            tool_call_id=tc.id, tool_name=tc.name, arguments=kwargs,
-        ))
-
-        # Hook: PRE_TOOL_USE — can block or rewrite arguments
-        if self.hook_runner:
-            agg = await self.hook_runner.run_hooks(
-                HookEvent.PRE_TOOL_USE, tool_name=tc.name, arguments=kwargs,
-            )
-            if agg.should_block:
-                result = f"Blocked by hook for tool '{tc.name}': {'; '.join(agg.blocking_errors)}"
-                await self.bus.emit(ToolCallEnd(
-                    tool_call_id=tc.id, tool_name=tc.name, result=result,
-                ))
-                return result
-            if agg.updated_input:
-                kwargs = agg.updated_input
-
-        try:
-            result = await tool.execute(**kwargs)
-        except Exception as exc:
-            result = f"Error executing tool '{tc.name}': {exc}"
-
-        # Hook: POST_TOOL_USE — can inject additional context
-        if self.hook_runner:
-            agg = await self.hook_runner.run_hooks(
-                HookEvent.POST_TOOL_USE, tool_name=tc.name, arguments=kwargs, result=result,
-            )
-            if agg.additional_contexts:
-                result += "\n[Hook] " + "\n[Hook] ".join(agg.additional_contexts)
-
-        await self.bus.emit(ToolCallEnd(
-            tool_call_id=tc.id, tool_name=tc.name, result=result,
-        ))
-
-        return result
-
-    def _append_tool_result(self, tc: ToolCallInfo, result: str | BaseException) -> None:
-        if isinstance(result, BaseException):
-            content = f"Error executing tool '{tc.name}': {result}"
-        else:
-            content = result
-        self.messages.append(ChatMessage(
-            role="tool",
-            content=content,
-            tool_call_id=tc.id,
-            name=tc.name,
-        ))
+        """Run a single tool through the shared orchestrator."""
+        return (await self.tool_orchestrator.execute_tool_call(tc)).content
 
     async def _auto_compact(self) -> None:
         """Compact conversation when token threshold is exceeded."""
@@ -338,9 +267,17 @@ class Agent:
             return
         # Replace messages: summary boundary + preserved tail
         preserved = self.messages[len(self.messages) - result.preserved_count:]
-        self.messages.clear()
+        self.conversation.clear()
         self.messages.extend(result.to_messages())
         self.messages.extend(preserved)
+        self.turn_runtime.record_compaction(
+            removed_count=result.removed_count,
+            preserved_count=result.preserved_count,
+            pre_tokens=result.pre_tokens,
+            post_tokens=result.post_tokens,
+            message_count=len(self.messages),
+        )
+        self._refresh_turn_runtime_metrics()
         # Invalidate prompt cache since context changed
         if self.prompt_builder:
             self.prompt_builder.invalidate()
@@ -359,6 +296,16 @@ class Agent:
 
     def reset(self) -> None:
         self.messages.clear()
+        self.turn_runtime.reset()
+
+    def _refresh_turn_runtime_metrics(self) -> None:
+        compaction_pending = False
+        if self.compactor is not None:
+            compaction_pending = self.compactor.should_compact(self.messages)
+        self.turn_runtime.update_message_metrics(
+            self.messages,
+            compaction_pending=compaction_pending,
+        )
 
     async def close(self) -> None:
         if self._client is not None:

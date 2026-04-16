@@ -10,6 +10,7 @@ import pytest
 from superhaojun.memory.store import (
     MemoryCategory,
     MemoryEntry,
+    MemoryPromptEntry,
     MemoryStore,
     _entry_from_markdown,
     _entry_to_markdown,
@@ -224,12 +225,44 @@ class TestLegacyMigration:
 # MemoryStore — Prompt text
 # ---------------------------------------------------------------------------
 class TestPromptText:
+    def test_build_prompt_entry_uses_index_and_bounded_topic_expansion(self, tmp_path: Path) -> None:
+        store = MemoryStore(storage_dir=tmp_path)
+        first = store.add(
+            MemoryCategory.USER,
+            "User prefers concise responses and clear summaries.",
+            name="Response Style",
+            description="User preference",
+        )
+        second = store.add(
+            MemoryCategory.PROJECT,
+            "Project uses uv for environment management and pytest for tests.",
+            name="Tooling",
+            description="Project setup",
+        )
+        entry = store.build_prompt_entry(
+            index_char_limit=120,
+            max_topics=1,
+            topic_char_limit=40,
+            total_topic_char_limit=40,
+        )
+
+        assert isinstance(entry, MemoryPromptEntry)
+        assert "Memory Index" in entry.text
+        assert "Loaded Topics" in entry.text
+        assert len(entry.loaded_entries) == 1
+        assert entry.loaded_entries[0]["id"] == second.entry_id[:8]
+        assert entry.loaded_entries[0]["name"] == "Tooling"
+        assert entry.loaded_entries[0]["category"] == MemoryCategory.PROJECT.value
+        assert entry.truncated is True
+        assert first.entry_id[:8] not in entry.text
+
     def test_to_prompt_text(self, tmp_path: Path) -> None:
         store = MemoryStore(storage_dir=tmp_path)
         store.add(MemoryCategory.USER, "Likes clean code.")
         store.add(MemoryCategory.PROJECT, "Uses uv package manager.")
         text = store.to_prompt_text()
-        assert "clean code" in text
+        assert "Memory Index" in text
+        assert "Loaded Topics" in text
         assert "uv package manager" in text
 
     def test_empty_prompt_text(self, tmp_path: Path) -> None:
@@ -241,8 +274,8 @@ class TestPromptText:
         store.add(MemoryCategory.USER, "u1")
         store.add(MemoryCategory.FEEDBACK, "f1")
         text = store.to_prompt_text()
-        assert "[user]" in text
-        assert "[feedback]" in text
+        assert "## User" in text
+        assert "## Feedback" in text
 
 
 # ---------------------------------------------------------------------------

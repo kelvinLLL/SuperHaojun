@@ -9,9 +9,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
-from .client import Diagnostic, HoverInfo, LSPClient, Location
+from .client import Diagnostic, HoverInfo, Location
+from .diagnostics import DiagnosticRegistry
+from .managed import ManagedLSPClient
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,8 @@ class LSPService:
         await service.stop_all()
     """
     _servers: dict[str, LSPServerConfig] = field(default_factory=dict)
-    _clients: dict[str, LSPClient] = field(default_factory=dict)
+    _clients: dict[str, ManagedLSPClient] = field(default_factory=dict)
+    _diagnostics: DiagnosticRegistry = field(default_factory=DiagnosticRegistry)
     _workspace_root: str = "."
 
     def add_server(self, config: LSPServerConfig) -> None:
@@ -50,7 +52,7 @@ class LSPService:
         self._workspace_root = workspace_root
         for lang_id, config in self._servers.items():
             try:
-                client = LSPClient(command=config.command, args=config.args)
+                client = ManagedLSPClient(command=config.command, args=config.args)
                 await client.start(workspace_root)
                 self._clients[lang_id] = client
                 logger.info("LSP server started: %s (%s)", lang_id, config.command)
@@ -65,8 +67,9 @@ class LSPService:
             except Exception as exc:
                 logger.warning("Error stopping LSP server %s: %s", lang_id, exc)
         self._clients.clear()
+        self._diagnostics.clear_all()
 
-    def get_client(self, language_id: str) -> LSPClient | None:
+    def get_client(self, language_id: str) -> ManagedLSPClient | None:
         """Get the LSP client for a language."""
         return self._clients.get(language_id)
 
@@ -89,15 +92,24 @@ class LSPService:
         client = self._clients.get(lang_id)
         if not client:
             return []
-        return await client.get_diagnostics(file_path)
+        diags = await client.get_diagnostics(file_path)
+        self._diagnostics.update_file(file_path, lang_id, diags)
+        return diags
 
     async def get_all_diagnostics(self) -> list[Diagnostic]:
         """Get all cached diagnostics from all servers."""
-        all_diags: list[Diagnostic] = []
-        for client in self._clients.values():
-            for diags in client._diagnostics.values():
-                all_diags.extend(diags)
-        return all_diags
+        self._refresh_diagnostics()
+        return [
+            Diagnostic(
+                file_path=d.file_path,
+                line=d.line,
+                character=d.character,
+                severity=d.severity,
+                message=d.message,
+                source=d.provider,
+            )
+            for d in self._diagnostics.get_all()
+        ]
 
     async def hover(self, file_path: str, line: int, character: int) -> HoverInfo | None:
         """Get hover info at a position."""
@@ -122,18 +134,23 @@ class LSPService:
         """
         if not self._clients:
             return ""
+        self._refresh_diagnostics()
         lines = ["## LSP Context"]
         for lang_id, client in self._clients.items():
             status = "running" if client.is_running else "stopped"
-            total_diags = sum(len(d) for d in client._diagnostics.values())
-            lines.append(f"- {lang_id}: {status} ({total_diags} diagnostics)")
-
-            # Include error-level diagnostics
-            for uri, diags in client._diagnostics.items():
-                errors = [d for d in diags if d.severity == 1]
-                for d in errors[:5]:  # Max 5 errors per file
-                    lines.append(f"  ERROR {d.file_path}:{d.line+1}: {d.message}")
+            lines.append(f"- {lang_id}: {status}")
+        diag_ctx = self._diagnostics.to_prompt_context()
+        if diag_ctx:
+            lines.append("")
+            lines.extend(diag_ctx.splitlines())
         return "\n".join(lines)
+
+    def _refresh_diagnostics(self) -> None:
+        """Rebuild the diagnostic registry from managed client snapshots."""
+        self._diagnostics.clear_all()
+        for lang_id, client in self._clients.items():
+            for file_path, diags in client.diagnostics_by_file().items():
+                self._diagnostics.update_file(file_path, lang_id, diags)
 
     def _detect_language(self, file_path: str) -> str:
         """Detect language ID from file extension."""

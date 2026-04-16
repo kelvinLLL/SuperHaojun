@@ -8,8 +8,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from superhaojun.agent import Agent, ChatMessage, ToolCallInfo
+from superhaojun.agent import Agent, ToolCallInfo
 from superhaojun.bus import MessageBus
+from superhaojun.conversation import ChatMessage, ConversationState
 from superhaojun.config import ModelConfig
 from superhaojun.messages import (
     AgentEnd, AgentStart, TextDelta, ToolCallEnd, ToolCallStart,
@@ -63,6 +64,8 @@ def _collect_from_bus(bus: MessageBus) -> list:
 class TestAgent:
     def test_initial_state(self, agent: Agent) -> None:
         assert agent.messages == []
+        assert isinstance(agent.conversation, ConversationState)
+        assert agent.conversation.messages is agent.messages
         # prompt_builder is None and system_prompt is empty for test agent
         assert agent.prompt_builder is None
 

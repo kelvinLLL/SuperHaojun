@@ -18,6 +18,7 @@ dependencies = [
 [project.scripts]
 superhaojun = "superhaojun.main:main"
 superhaojun-web = "superhaojun.webui.launcher:main"
+superhaojun-tui = "superhaojun.tui.launcher:main"
 
 [dependency-groups]
 dev = [

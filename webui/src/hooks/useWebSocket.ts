@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useChatStore, usePanelStore } from "@/stores";
-import type { WSMessage } from "@/types";
+import type { ChatMessageData, RuntimeState, ServerChatMessage, TokenUsage, WSMessage } from "@/types";
 
 let ws: WebSocket | null = null;
+const EXPECTED_AGENT_TERMINAL_MESSAGES = new Set(["Interrupted by user."]);
 
 function fetchModels() {
   fetch("/api/config/models")
@@ -16,6 +17,22 @@ function fetchCommands() {
     .then((r) => r.json())
     .then((cmds) => usePanelStore.getState().setCommands(cmds))
     .catch(() => {});
+}
+
+function toTokenUsage(runtime: RuntimeState): TokenUsage {
+  return {
+    message_count: runtime.message_count,
+    estimated_tokens: runtime.estimated_tokens,
+    max_tokens: 128000,
+    compaction_count: runtime.compaction_count,
+  };
+}
+
+function normalizeMessages(messages: ServerChatMessage[]): ChatMessageData[] {
+  return messages.map((message, index) => ({
+    id: `init-${index}-${crypto.randomUUID()}`,
+    ...message,
+  }));
 }
 
 export function useWebSocket() {
@@ -52,8 +69,19 @@ export function useWebSocket() {
   const handleMessage = (msg: WSMessage) => {
     switch (msg.type) {
       case "init":
-        useChatStore.getState().setTools(msg.tools);
-        useChatStore.getState().setTokenUsage(msg.token_usage);
+        useChatStore.setState({
+          messages: normalizeMessages(msg.messages),
+          streamingText: "",
+          isStreaming: false,
+          toolCalls: {},
+          permissionRequest: null,
+          tools: msg.tools,
+          tokenUsage: msg.token_usage ?? toTokenUsage(msg.runtime),
+        });
+        break;
+
+      case "runtime_state":
+        useChatStore.getState().setTokenUsage(toTokenUsage(msg.runtime));
         break;
 
       case "agent_start":
@@ -116,7 +144,11 @@ export function useWebSocket() {
         break;
 
       case "error":
-        console.error("[Agent Error]", msg.message);
+        if (EXPECTED_AGENT_TERMINAL_MESSAGES.has(msg.message)) {
+          console.info("[Agent Status]", msg.message);
+        } else {
+          console.error("[Agent Error]", msg.message);
+        }
         // Add error as system message
         useChatStore.setState((s) => ({
           messages: [
@@ -129,7 +161,7 @@ export function useWebSocket() {
               timestamp: Date.now(),
             },
           ],
-          isStreaming: false,
+          permissionRequest: null,
         }));
         break;
     }
@@ -151,6 +183,10 @@ export function useWebSocket() {
     useChatStore.getState().setPermission(null);
   }, [send]);
 
+  const interrupt = useCallback(() => {
+    send({ type: "interrupt" });
+  }, [send]);
+
   useEffect(() => {
     connect();
     return () => {
@@ -159,5 +195,5 @@ export function useWebSocket() {
     };
   }, [connect]);
 
-  return { sendMessage, respondPermission, send };
+  return { sendMessage, respondPermission, interrupt, send };
 }

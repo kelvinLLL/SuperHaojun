@@ -10,9 +10,10 @@ Caches the cacheable portion separately for prompt cache optimization.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from ..constants import SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+from ..extensions.runtime import ExtensionRuntime
 from .context import GitInfo, PromptContext, gather_git_info_sync
 from .sections import PromptSection
 from .sections.custom import CustomInstructionsSection
@@ -52,12 +53,15 @@ class SystemPromptBuilder:
         tool_summaries: list[dict[str, str]] | None = None,
         custom_instructions: str = "",
         memory_text: str = "",
+        extension_runtime: ExtensionRuntime | None = None,
         sections: list[PromptSection] | None = None,
     ) -> None:
         self._working_dir = working_dir
         self._tool_summaries = tool_summaries or []
         self._custom_instructions = custom_instructions
         self._memory_text = memory_text
+        self._memory_metadata: dict[str, Any] | None = None
+        self._extension_runtime = extension_runtime or ExtensionRuntime(working_dir)
         self._sections = sections if sections is not None else _default_sections()
         self._cached_static: str | None = None
         self._cached_full: str | None = None
@@ -71,14 +75,40 @@ class SystemPromptBuilder:
             working_dir=self._working_dir,
             tool_summaries=self._tool_summaries,
             memory_text=self._memory_text,
+            memory_metadata=self.memory_entry_metadata,
+            extensions=self.extension_entries,
             custom_instructions=self._custom_instructions,
             git_info=git_info,
             session_summary=self._session_summary,
         )
 
-    def set_memory_text(self, text: str) -> None:
+    @property
+    def memory_entry_metadata(self) -> dict[str, Any] | None:
+        if self._memory_metadata is None:
+            return None
+        return {
+            key: [dict(item) for item in value] if key == "loaded_entries" else value
+            for key, value in self._memory_metadata.items()
+        }
+
+    @property
+    def extension_entries(self) -> list[dict[str, Any]]:
+        return [dict(entry) for entry in self._extension_runtime.prompt_entries()]
+
+    @property
+    def extension_metadata(self) -> list[dict[str, Any]]:
+        return [dict(entry) for entry in self._extension_runtime.list_extensions()]
+
+    def set_memory_text(self, text: str, *, metadata: dict[str, Any] | None = None) -> None:
         self._memory_text = text
+        self._memory_metadata = None if metadata is None else {
+            key: [dict(item) for item in value] if key == "loaded_entries" else value
+            for key, value in metadata.items()
+        }
         self._cached_full = None  # dynamic part changed
+
+    def set_memory_entry(self, entry: "MemoryPromptEntry") -> None:
+        self.set_memory_text(entry.text, metadata=entry.metadata())
 
     def set_session_summary(self, summary: str) -> None:
         self._session_summary = summary

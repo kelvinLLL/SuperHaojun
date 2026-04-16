@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from superhaojun.mcp.config import MCPServerConfig, MCPServerStatus, load_mcp_configs
+from superhaojun.mcp.config import (
+    MCPServerApproval,
+    MCPServerConfig,
+    MCPServerStatus,
+    load_mcp_configs,
+)
 from superhaojun.mcp.client import MCPClient, MCPToolInfo
 from superhaojun.mcp.adapter import MCPToolAdapter
 from superhaojun.mcp.manager import MCPManager, MCPServerState
@@ -25,10 +30,21 @@ class TestMCPServerConfig:
         assert cfg.transport == "stdio"
         assert cfg.enabled is True
         assert cfg.scope == "project"
+        assert cfg.effective_approval == MCPServerApproval.PENDING
+
+    def test_to_dict_serializes_explicit_approval(self):
+        cfg = MCPServerConfig(name="test", approval=MCPServerApproval.APPROVED)
+        data = cfg.to_dict()
+        assert data["name"] == "test"
+        assert data["approval"] == "approved"
 
     def test_sse_transport(self):
         cfg = MCPServerConfig(name="web", transport="sse", url="http://localhost:3001/sse")
         assert cfg.url == "http://localhost:3001/sse"
+
+    def test_user_scope_defaults_to_approved(self):
+        cfg = MCPServerConfig(name="test", scope="user")
+        assert cfg.effective_approval == MCPServerApproval.APPROVED
 
     def test_frozen(self):
         cfg = MCPServerConfig(name="test")
@@ -47,6 +63,7 @@ class TestLoadMCPConfigs:
         assert len(configs) == 1
         assert configs[0].name == "fs"
         assert configs[0].scope == "project"
+        assert configs[0].effective_approval == MCPServerApproval.PENDING
 
     def test_load_user_only(self, tmp_path):
         u = tmp_path / "user_mcp.json"
@@ -54,6 +71,15 @@ class TestLoadMCPConfigs:
         configs = load_mcp_configs(user_path=u)
         assert len(configs) == 1
         assert configs[0].scope == "user"
+        assert configs[0].effective_approval == MCPServerApproval.APPROVED
+
+    def test_load_explicit_approval(self, tmp_path):
+        p = tmp_path / "project.json"
+        p.write_text(json.dumps({"servers": [
+            {"name": "fs", "command": "new-cmd", "approval": "approved"},
+        ]}))
+        configs = load_mcp_configs(project_path=p)
+        assert configs[0].effective_approval == MCPServerApproval.APPROVED
 
     def test_project_overrides_user(self, tmp_path):
         u = tmp_path / "user.json"
@@ -109,6 +135,7 @@ class TestMCPManager:
         mgr.load_configs([self._make_config("a"), self._make_config("b")])
         status = mgr.get_status()
         assert len(status) == 2
+        assert status[0]["approval"] == "pending"
 
     def test_load_disabled(self):
         mgr = MCPManager()
@@ -118,13 +145,23 @@ class TestMCPManager:
 
     async def test_start_all(self):
         mgr = MCPManager()
-        mgr.load_configs([self._make_config("a")])
+        mgr.load_configs([MCPServerConfig(name="a", command="echo", approval=MCPServerApproval.APPROVED)])
         with patch.object(MCPClient, "start", new_callable=AsyncMock) as mock_start, \
              patch.object(MCPClient, "list_tools", new_callable=AsyncMock, return_value=[]):
             await mgr.start_all()
             mock_start.assert_called_once()
         status = mgr.get_status()
         assert status[0]["status"] == "running"
+
+    async def test_start_all_skips_pending_approval(self):
+        mgr = MCPManager()
+        mgr.load_configs([self._make_config("a")])
+        with patch.object(MCPClient, "start", new_callable=AsyncMock) as mock_start:
+            await mgr.start_all()
+        mock_start.assert_not_called()
+        status = mgr.get_status()
+        assert status[0]["status"] == "stopped"
+        assert status[0]["approval"] == "pending"
 
     async def test_stop_all(self):
         mgr = MCPManager()
@@ -139,11 +176,46 @@ class TestMCPManager:
 
     async def test_enable(self):
         mgr = MCPManager()
-        mgr.load_configs([self._make_config("a", enabled=False)])
+        mgr.load_configs([MCPServerConfig(
+            name="a", command="echo", enabled=False, approval=MCPServerApproval.APPROVED
+        )])
         with patch.object(MCPClient, "start", new_callable=AsyncMock), \
              patch.object(MCPClient, "list_tools", new_callable=AsyncMock, return_value=[]):
             ok = await mgr.enable("a")
         assert ok is True
+
+    async def test_enable_requires_approval(self):
+        mgr = MCPManager()
+        mgr.load_configs([self._make_config("a")])
+        with patch.object(MCPClient, "start", new_callable=AsyncMock) as mock_start:
+            ok = await mgr.enable("a")
+        assert ok is False
+        mock_start.assert_not_called()
+
+    async def test_approve_then_enable(self):
+        mgr = MCPManager()
+        mgr.load_configs([self._make_config("a")])
+        assert await mgr.approve("a") is True
+        with patch.object(MCPClient, "start", new_callable=AsyncMock), \
+             patch.object(MCPClient, "list_tools", new_callable=AsyncMock, return_value=[]):
+            ok = await mgr.enable("a")
+        assert ok is True
+        assert mgr.get_status()[0]["approval"] == "approved"
+
+    async def test_set_approval_updates_config_state(self):
+        mgr = MCPManager()
+        mgr.load_configs([MCPServerConfig(name="a", command="echo", approval=MCPServerApproval.APPROVED)])
+        with patch.object(MCPClient, "start", new_callable=AsyncMock), \
+             patch.object(MCPClient, "list_tools", new_callable=AsyncMock, return_value=[]):
+            await mgr.start_all()
+
+        ok = await mgr.set_approval("a", MCPServerApproval.PENDING)
+
+        assert ok is True
+        state = mgr._servers["a"]
+        assert state.approval == MCPServerApproval.PENDING
+        assert state.config.approval == MCPServerApproval.PENDING
+        assert state.status == MCPServerStatus.STOPPED
 
     async def test_enable_nonexistent(self):
         mgr = MCPManager()
@@ -163,7 +235,7 @@ class TestMCPManager:
 
     async def test_reconnect(self):
         mgr = MCPManager()
-        mgr.load_configs([self._make_config("a")])
+        mgr.load_configs([MCPServerConfig(name="a", command="echo", approval=MCPServerApproval.APPROVED)])
         with patch.object(MCPClient, "start", new_callable=AsyncMock), \
              patch.object(MCPClient, "list_tools", new_callable=AsyncMock, return_value=[]), \
              patch.object(MCPClient, "stop", new_callable=AsyncMock):
@@ -174,7 +246,7 @@ class TestMCPManager:
 
     async def test_start_error(self):
         mgr = MCPManager()
-        mgr.load_configs([self._make_config("a")])
+        mgr.load_configs([MCPServerConfig(name="a", command="echo", approval=MCPServerApproval.APPROVED)])
         with patch.object(MCPClient, "start", new_callable=AsyncMock, side_effect=RuntimeError("fail")), \
              patch.object(MCPClient, "stop", new_callable=AsyncMock):
             await mgr.start_all()
@@ -195,7 +267,7 @@ class TestMCPManager:
 
         mgr = MCPManager()
         mgr.set_tool_registry(mock_registry)
-        mgr.load_configs([self._make_config("a")])
+        mgr.load_configs([MCPServerConfig(name="a", command="echo", approval=MCPServerApproval.APPROVED)])
 
         tool_info = MCPToolInfo(name="read", description="Read file", input_schema={"type": "object"})
         with patch.object(MCPClient, "start", new_callable=AsyncMock), \
@@ -210,6 +282,19 @@ class TestMCPManager:
     def test_list_all_tools_empty(self):
         mgr = MCPManager()
         assert mgr.list_all_tools() == []
+
+    async def test_deny_stops_running_server(self):
+        mgr = MCPManager()
+        mgr.load_configs([MCPServerConfig(name="a", command="echo", approval=MCPServerApproval.APPROVED)])
+        with patch.object(MCPClient, "start", new_callable=AsyncMock), \
+             patch.object(MCPClient, "list_tools", new_callable=AsyncMock, return_value=[]), \
+             patch.object(MCPClient, "stop", new_callable=AsyncMock):
+            await mgr.start_all()
+            ok = await mgr.deny("a")
+        assert ok is True
+        status = mgr.get_status()[0]
+        assert status["status"] == "stopped"
+        assert status["approval"] == "denied"
 
 
 # ── MCPToolAdapter (unchanged, but verify) ──
@@ -274,15 +359,39 @@ class TestMCPCommand:
         cmd = MCPCommand()
         result = await cmd.execute("list", self._make_context(mgr))
         assert "fs" in result
+        assert "approval=pending" in result
 
     async def test_enable(self):
         mgr = MCPManager()
-        mgr.load_configs([MCPServerConfig(name="fs", command="echo")])
+        mgr.load_configs([MCPServerConfig(
+            name="fs", command="echo", approval=MCPServerApproval.APPROVED
+        )])
         with patch.object(MCPClient, "start", new_callable=AsyncMock), \
              patch.object(MCPClient, "list_tools", new_callable=AsyncMock, return_value=[]):
             cmd = MCPCommand()
             result = await cmd.execute("enable fs", self._make_context(mgr))
         assert "Enabled" in result
+
+    async def test_enable_pending_server_reports_approval_requirement(self):
+        mgr = MCPManager()
+        mgr.load_configs([MCPServerConfig(name="fs", command="echo")])
+        cmd = MCPCommand()
+        result = await cmd.execute("enable fs", self._make_context(mgr))
+        assert "approval" in result.lower()
+
+    async def test_approve(self):
+        mgr = MCPManager()
+        mgr.load_configs([MCPServerConfig(name="fs", command="echo")])
+        cmd = MCPCommand()
+        result = await cmd.execute("approve fs", self._make_context(mgr))
+        assert "Approved" in result
+
+    async def test_deny(self):
+        mgr = MCPManager()
+        mgr.load_configs([MCPServerConfig(name="fs", command="echo")])
+        cmd = MCPCommand()
+        result = await cmd.execute("deny fs", self._make_context(mgr))
+        assert "Denied" in result
 
     async def test_disable(self):
         mgr = MCPManager()
@@ -308,6 +417,14 @@ class TestMCPCommand:
         cmd = MCPCommand()
         result = await cmd.execute("badcmd", self._make_context(mgr))
         assert "Unknown subcommand" in result
+
+    async def test_set_approval(self):
+        mgr = MCPManager()
+        mgr.load_configs([MCPServerConfig(name="fs", command="echo")])
+        cmd = MCPCommand()
+        result = await cmd.execute("set-approval fs approved", self._make_context(mgr))
+        assert "Set approval" in result
+        assert mgr.get_status()[0]["approval"] == "approved"
 
     def test_name_and_description(self):
         cmd = MCPCommand()

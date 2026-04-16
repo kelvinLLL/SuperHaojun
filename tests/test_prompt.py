@@ -45,6 +45,7 @@ class TestPromptContext:
         assert ctx.working_dir == ""
         assert ctx.tool_summaries == []
         assert ctx.memory_text == ""
+        assert ctx.memory_metadata is None
         assert ctx.git_info is None
 
     def test_custom_fields(self) -> None:
@@ -52,11 +53,13 @@ class TestPromptContext:
             working_dir="/tmp",
             tool_summaries=[{"name": "bash", "description": "Run commands"}],
             memory_text="some memory",
+            memory_metadata={"entry_count": 1},
             custom_instructions="be nice",
             session_summary="did stuff",
         )
         assert ctx.working_dir == "/tmp"
         assert len(ctx.tool_summaries) == 1
+        assert ctx.memory_metadata == {"entry_count": 1}
         assert ctx.session_summary == "did stuff"
 
 
@@ -112,6 +115,33 @@ class TestToolsSection:
 
 
 class TestProjectInstructionsSection:
+    def test_uses_loaded_extensions_when_present(self) -> None:
+        ctx = PromptContext(extensions=[
+            {
+                "id": "instruction:SUPERHAOJUN.md",
+                "kind": "instruction",
+                "name": "SUPERHAOJUN.md",
+                "source": "SUPERHAOJUN.md",
+                "enabled": True,
+                "prompt_enabled": True,
+                "scope": "repo",
+                "prompt_text": "Use dataclasses.",
+            },
+            {
+                "id": "workflow_rules:specs/development-rules.md",
+                "kind": "workflow_rules",
+                "name": "development-rules.md",
+                "source": "specs/development-rules.md",
+                "enabled": True,
+                "prompt_enabled": True,
+                "scope": "repo",
+                "prompt_text": "Explainability First.",
+            },
+        ])
+        content = ProjectInstructionsSection().build(ctx)
+        assert "Use dataclasses." in content
+        assert "Explainability First." in content
+
     def test_discovers_superhaojun_md(self, tmp_path: Path) -> None:
         (tmp_path / "SUPERHAOJUN.md").write_text("Use dataclasses.")
         ctx = PromptContext(working_dir=str(tmp_path))
@@ -314,6 +344,29 @@ class TestSystemPromptBuilderV2:
         assert first is not second
         assert "New memory" in second
 
+    def test_set_memory_entry_tracks_metadata(self) -> None:
+        from superhaojun.memory.store import MemoryPromptEntry
+
+        builder = SystemPromptBuilder(working_dir="/tmp")
+        builder.set_memory_entry(MemoryPromptEntry(
+            text="Memory Index\n\nLoaded Topics\n- test",
+            loaded_entries=[{"id": "abc12345", "name": "Test", "category": "user", "source": "user_test.md", "chars": 4}],
+            truncated=False,
+            total_chars=30,
+            index_chars=12,
+            topic_chars=18,
+        ))
+        prompt = builder.build()
+
+        assert "Loaded Topics" in prompt
+        assert builder.memory_entry_metadata == {
+            "loaded_entries": [{"id": "abc12345", "name": "Test", "category": "user", "source": "user_test.md", "chars": 4}],
+            "truncated": False,
+            "total_chars": 30,
+            "index_chars": 12,
+            "topic_chars": 18,
+        }
+
     def test_set_session_summary(self) -> None:
         builder = SystemPromptBuilder(working_dir="/tmp")
         builder.set_session_summary("Did refactoring work")
@@ -340,6 +393,14 @@ class TestSystemPromptBuilderV2:
         builder = SystemPromptBuilder(working_dir=str(tmp_path))
         prompt = builder.build()
         assert "Brand instructions." in prompt
+
+    def test_includes_development_rules_via_extensions_runtime(self, tmp_path: Path) -> None:
+        specs = tmp_path / "specs"
+        specs.mkdir()
+        (specs / "development-rules.md").write_text("Explainability First.")
+        builder = SystemPromptBuilder(working_dir=str(tmp_path))
+        prompt = builder.build()
+        assert "Explainability First." in prompt
 
     def test_backward_compat_no_claude_md(self, tmp_path: Path) -> None:
         (tmp_path / "CLAUDE.md").write_text("Claude rule.")

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from superhaojun.agent import ChatMessage
+from superhaojun.conversation import ChatMessage
 from superhaojun.session.manager import SessionInfo, SessionManager, SessionWriter
 
 
@@ -229,6 +229,22 @@ class TestBackwardCompatibility:
 
 
 class TestSessionSerialization:
+    def test_reasoning_details_roundtrip(self, tmp_path: Path) -> None:
+        mgr = SessionManager(storage_dir=tmp_path)
+        messages = [
+            ChatMessage(
+                role="assistant",
+                content="Need to think",
+                reasoning_details="internal reasoning trace",
+            ),
+        ]
+
+        mgr.save("reasoning", messages)
+        loaded = mgr.load("reasoning")
+
+        assert len(loaded) == 1
+        assert loaded[0].reasoning_details == "internal reasoning trace"
+
     def test_tool_call_roundtrip(self, tmp_path: Path) -> None:
         mgr = SessionManager(storage_dir=tmp_path)
         messages = [

@@ -57,7 +57,33 @@ class MemoryEntry:
             self.name = preview
 
 
+@dataclass(frozen=True)
+class MemoryPromptEntry:
+    """Bounded prompt export plus metadata about injected durable memory."""
+
+    text: str
+    loaded_entries: list[dict[str, Any]] = field(default_factory=list)
+    truncated: bool = False
+    total_chars: int = 0
+    index_chars: int = 0
+    topic_chars: int = 0
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "loaded_entries": [dict(entry) for entry in self.loaded_entries],
+            "truncated": self.truncated,
+            "total_chars": self.total_chars,
+            "index_chars": self.index_chars,
+            "topic_chars": self.topic_chars,
+        }
+
+
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?(.*)", re.DOTALL)
+
+DEFAULT_MEMORY_INDEX_CHAR_LIMIT = 1200
+DEFAULT_MEMORY_MAX_TOPICS = 3
+DEFAULT_MEMORY_TOPIC_CHAR_LIMIT = 240
+DEFAULT_MEMORY_TOTAL_TOPIC_CHAR_LIMIT = 900
 
 
 def _entry_to_markdown(entry: MemoryEntry) -> str:
@@ -107,6 +133,15 @@ def _safe_filename(entry: MemoryEntry) -> str:
     if not slug:
         slug = entry.entry_id[:8]
     return f"{entry.category.value}_{slug}_{entry.entry_id[:8]}.md"
+
+
+def _truncate_text(text: str, limit: int) -> tuple[str, bool]:
+    """Truncate text to a character budget with a compact ellipsis."""
+    if limit <= 0 or len(text) <= limit:
+        return text, False
+    if limit <= 3:
+        return text[:limit], True
+    return text[: limit - 3].rstrip() + "...", True
 
 
 class MemoryStore:
@@ -224,21 +259,74 @@ class MemoryStore:
         self._load_all()
 
     def to_prompt_text(self) -> str:
-        """Generate text for system prompt injection, grouped by category."""
+        """Generate bounded text for system prompt injection."""
+        return self.build_prompt_entry().text
+
+    def build_prompt_entry(
+        self,
+        *,
+        index_char_limit: int = DEFAULT_MEMORY_INDEX_CHAR_LIMIT,
+        max_topics: int = DEFAULT_MEMORY_MAX_TOPICS,
+        topic_char_limit: int = DEFAULT_MEMORY_TOPIC_CHAR_LIMIT,
+        total_topic_char_limit: int = DEFAULT_MEMORY_TOTAL_TOPIC_CHAR_LIMIT,
+    ) -> MemoryPromptEntry:
+        """Export a bounded, inspectable memory entry surface for prompt use."""
         entries = self.list_entries()
         if not entries:
-            return ""
-        lines: list[str] = []
-        by_cat: dict[MemoryCategory, list[MemoryEntry]] = {}
-        for e in entries:
-            by_cat.setdefault(e.category, []).append(e)
-        for cat in MemoryCategory:
-            cat_entries = by_cat.get(cat, [])
-            if cat_entries:
-                lines.append(f"[{cat.value}]")
-                for e in cat_entries:
-                    lines.append(f"- {e.content}")
-        return "\n".join(lines)
+            return MemoryPromptEntry(text="")
+
+        index_text, index_truncated = _truncate_text(
+            self._render_index_text(include_links=False).strip(),
+            index_char_limit,
+        )
+
+        loaded_entries: list[dict[str, Any]] = []
+        topic_lines: list[str] = []
+        remaining_topic_chars = total_topic_char_limit
+        topic_chars = 0
+        truncated = index_truncated
+
+        for entry in reversed(entries):
+            if len(loaded_entries) >= max_topics or remaining_topic_chars <= 0:
+                truncated = True
+                break
+            excerpt_budget = min(topic_char_limit, remaining_topic_chars)
+            excerpt, excerpt_truncated = _truncate_text(entry.content.strip(), excerpt_budget)
+            if not excerpt:
+                continue
+
+            filename = _safe_filename(entry)
+            loaded_entries.append({
+                "id": entry.entry_id[:8],
+                "name": entry.name,
+                "category": entry.category.value,
+                "source": filename,
+                "chars": len(excerpt),
+            })
+            topic_lines.append(
+                f"- [{entry.category.value}] {entry.name} "
+                f"(id: {entry.entry_id[:8]}, source: {filename})\n"
+                f"  {excerpt}"
+            )
+            topic_chars += len(excerpt)
+            remaining_topic_chars -= len(excerpt)
+            truncated = truncated or excerpt_truncated
+
+        if len(entries) > len(loaded_entries):
+            truncated = True
+
+        parts = [index_text]
+        if topic_lines:
+            parts.extend(["Loaded Topics", "\n".join(topic_lines)])
+
+        return MemoryPromptEntry(
+            text="\n\n".join(part for part in parts if part),
+            loaded_entries=loaded_entries,
+            truncated=truncated,
+            total_chars=len(index_text) + topic_chars,
+            index_chars=len(index_text),
+            topic_chars=topic_chars,
+        )
 
     def _write_entry(self, entry: MemoryEntry) -> None:
         self._storage_dir.mkdir(parents=True, exist_ok=True)
@@ -253,16 +341,26 @@ class MemoryStore:
                 self._index_path.unlink()
             return
         self._storage_dir.mkdir(parents=True, exist_ok=True)
-        lines = ["# Memory Index\n"]
+        self._index_path.write_text(self._render_index_text(include_links=True) + "\n", encoding="utf-8")
+
+    def _render_index_text(self, *, include_links: bool) -> str:
+        """Render the stable MEMORY.md index text from current entries."""
+        lines = ["# Memory Index", ""]
         by_cat: dict[MemoryCategory, list[MemoryEntry]] = {}
-        for e in self._entries.values():
-            by_cat.setdefault(e.category, []).append(e)
-        for cat in MemoryCategory:
-            cat_entries = by_cat.get(cat, [])
-            if cat_entries:
-                lines.append(f"\n## {cat.value.title()}\n")
-                for e in sorted(cat_entries, key=lambda x: x.created_at):
-                    filename = _safe_filename(e)
-                    desc = e.description or e.content[:80].replace("\n", " ")
-                    lines.append(f"- [{e.name}]({filename}) — {desc}")
-        self._index_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        for entry in self._entries.values():
+            by_cat.setdefault(entry.category, []).append(entry)
+        for category in MemoryCategory:
+            cat_entries = by_cat.get(category, [])
+            if not cat_entries:
+                continue
+            lines.append(f"## {category.value.title()}")
+            lines.append("")
+            for entry in sorted(cat_entries, key=lambda x: x.created_at):
+                filename = _safe_filename(entry)
+                desc = entry.description or entry.content[:80].replace("\n", " ")
+                if include_links:
+                    lines.append(f"- [{entry.name}]({filename}) — {desc}")
+                else:
+                    lines.append(f"- {entry.name} — {desc}")
+            lines.append("")
+        return "\n".join(lines).rstrip()

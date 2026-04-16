@@ -6,6 +6,7 @@ import asyncio
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,8 @@ class PromptContext:
     working_dir: str = ""
     tool_summaries: list[dict[str, str]] = field(default_factory=list)
     memory_text: str = ""
+    memory_metadata: dict[str, Any] | None = None
+    extensions: list[dict[str, Any]] = field(default_factory=list)
     custom_instructions: str = ""
     git_info: GitInfo | None = None
     session_summary: str = ""

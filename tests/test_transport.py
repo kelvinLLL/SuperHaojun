@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from superhaojun.transport import LocalTransport
+from superhaojun.transport import EXPERIMENTAL, LocalTransport
 from superhaojun.messages import TextDelta
 
 
 class TestLocalTransport:
+    def test_transport_package_marked_experimental(self) -> None:
+        assert EXPERIMENTAL is True
+
     async def test_create_pair(self) -> None:
         a, b = LocalTransport.create_pair()
         msg = TextDelta(text="hello")

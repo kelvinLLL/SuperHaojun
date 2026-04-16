@@ -19,6 +19,7 @@ from ..messages import (
     TextDelta, ToolCallEnd, ToolCallStart, TurnEnd, TurnStart,
     message_to_dict,
 )
+from ..runtime import build_command_context
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class WebUIState:
         self.connections: list[WebSocket] = []
         self.hook_log: list[dict[str, Any]] = []
         self.agent_history: list[dict[str, Any]] = []
+        self.current_task: asyncio.Task[None] | None = None
         self._setup_bus_forwarders()
 
     def _setup_bus_forwarders(self) -> None:
@@ -58,6 +60,11 @@ class WebUIState:
                     dead.append(ws)
             for ws in dead:
                 self.connections.remove(ws)
+            if self.connections:
+                await self.broadcast({
+                    "type": "runtime_state",
+                    "runtime": _get_runtime_state(self),
+                })
         return forward
 
     async def broadcast(self, data: dict[str, Any]) -> None:
@@ -104,6 +111,7 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
             "tools": _get_tools_list(state),
             "messages": _get_messages(state),
             "token_usage": _get_token_usage(state),
+            "runtime": _get_runtime_state(state),
         }, ensure_ascii=False, default=str))
 
         try:
@@ -140,7 +148,11 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
         mgr = getattr(app.state, "mcp_manager", None)
         if not mgr:
             return {"ok": False, "error": "No MCP manager"}
-        if action == "enable":
+        if action == "approve":
+            ok = await mgr.approve(name)
+        elif action == "deny":
+            ok = await mgr.deny(name)
+        elif action == "enable":
             ok = await mgr.enable(name)
         elif action == "disable":
             ok = await mgr.disable(name)
@@ -148,7 +160,7 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
             ok = await mgr.reconnect(name)
         else:
             return {"ok": False, "error": f"Unknown action: {action}"}
-        return {"ok": ok}
+        return {"ok": ok, "status": mgr.get_status()}
 
     @app.get("/api/hooks")
     async def get_hooks() -> list[dict[str, Any]]:
@@ -166,6 +178,13 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
             }
             for r in registry.list_hooks()
         ]
+
+    @app.get("/api/extensions")
+    async def get_extensions() -> list[dict[str, Any]]:
+        runtime = getattr(app.state, "extension_runtime", None)
+        if runtime is None:
+            return []
+        return runtime.list_extensions()
 
     @app.get("/api/hooks/log")
     async def get_hook_log() -> list[dict[str, Any]]:
@@ -196,6 +215,10 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
     @app.get("/api/token-usage")
     async def get_token_usage() -> dict[str, Any]:
         return _get_token_usage(state)
+
+    @app.get("/api/runtime")
+    async def get_runtime() -> dict[str, Any]:
+        return _get_runtime_state(state)
 
     @app.get("/api/config")
     async def get_config() -> dict[str, Any]:
@@ -275,7 +298,10 @@ async def _handle_ws_message(state: WebUIState, data: dict[str, Any]) -> None:
         if text.startswith("/"):
             asyncio.create_task(_run_slash_command(state, text))
         else:
-            asyncio.create_task(_run_agent_message(state, text))
+            if state.current_task is not None and not state.current_task.done():
+                await state.bus.emit(Error(message="Agent is already running. Interrupt it before sending another message."))
+                return
+            state.current_task = asyncio.create_task(_run_agent_message(state, text))
 
     elif msg_type == "permission_response":
         tool_call_id = data.get("tool_call_id", "")
@@ -285,7 +311,16 @@ async def _handle_ws_message(state: WebUIState, data: dict[str, Any]) -> None:
         ))
 
     elif msg_type == "interrupt":
-        pass  # TODO: implement interrupt
+        task = state.current_task
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            finally:
+                if state.current_task is task:
+                    state.current_task = None
 
     elif msg_type == "ping":
         await state.broadcast({"type": "pong"})
@@ -293,8 +328,6 @@ async def _handle_ws_message(state: WebUIState, data: dict[str, Any]) -> None:
 
 async def _run_slash_command(state: WebUIState, text: str) -> None:
     """Parse and execute a slash command, broadcasting the result."""
-    from ..commands.base import CommandContext
-
     # Parse: "/model list" → name="model", args="list"
     without_slash = text[1:]
     parts = without_slash.split(None, 1)
@@ -324,9 +357,7 @@ async def _run_slash_command(state: WebUIState, text: str) -> None:
         return
 
     # Build CommandContext with all available extras
-    context = CommandContext(agent=state.agent)
-    for k, v in state.extras.items():
-        setattr(context, k, v)
+    context = build_command_context(state.agent, **state.extras)
 
     try:
         result = await command.execute(cmd_args, context)
@@ -363,6 +394,10 @@ async def _run_slash_command(state: WebUIState, text: str) -> None:
 async def _run_agent_message(state: WebUIState, text: str) -> None:
     try:
         await state.agent.handle_user_message(text)
+    except asyncio.CancelledError:
+        state.agent.turn_runtime.fail("Interrupted by user.")
+        await state.bus.emit(Error(message="Interrupted by user."))
+        await state.bus.emit(AgentEnd())
     except Exception as exc:
         logger.error("Agent error: %s", exc)
         # Extract user-friendly error from API error responses
@@ -373,10 +408,13 @@ async def _run_agent_message(state: WebUIState, text: str) -> None:
             error_msg = "Authentication failed — check your API key configuration."
         elif "timeout" in error_msg.lower():
             error_msg = "Request timed out — the model provider may be slow. Try again."
-        await state.broadcast({
-            "type": "error",
-            "message": error_msg,
-        })
+        state.agent.turn_runtime.fail(error_msg)
+        await state.bus.emit(Error(message=error_msg))
+        await state.bus.emit(AgentEnd())
+    finally:
+        current_task = asyncio.current_task()
+        if state.current_task is current_task:
+            state.current_task = None
 
 
 def _get_messages(state: WebUIState) -> list[dict[str, Any]]:
@@ -387,6 +425,7 @@ def _get_messages(state: WebUIState) -> list[dict[str, Any]]:
             "tool_calls": m.tool_calls,
             "tool_call_id": m.tool_call_id,
             "name": m.name,
+            "reasoning_details": m.reasoning_details,
         }
         for m in state.agent.messages
     ]
@@ -404,13 +443,21 @@ def _get_tools_list(state: WebUIState) -> list[dict[str, Any]]:
 
 
 def _get_token_usage(state: WebUIState) -> dict[str, Any]:
-    msg_count = len(state.agent.messages)
-    # Rough estimation: ~4 chars per token
-    char_count = sum(len(m.content or "") for m in state.agent.messages)
-    est_tokens = char_count // 4
+    runtime = state.agent.turn_runtime.to_dict()
+    max_tokens = state.agent.compactor.max_tokens if state.agent.compactor else 128000
     return {
-        "message_count": msg_count,
-        "estimated_tokens": est_tokens,
-        "max_tokens": 128000,
-        "compaction_count": 0,
+        "message_count": runtime["message_count"],
+        "estimated_tokens": runtime["estimated_tokens"],
+        "max_tokens": max_tokens,
+        "compaction_count": runtime["compaction_count"],
     }
+
+
+def _get_runtime_state(state: WebUIState) -> dict[str, Any]:
+    runtime = state.agent.turn_runtime.to_dict()
+    extension_runtime = state.extras.get("extension_runtime")
+    if extension_runtime is not None:
+        runtime["extensions"] = extension_runtime.list_extensions()
+    else:
+        runtime["extensions"] = []
+    return runtime
