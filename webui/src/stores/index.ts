@@ -11,6 +11,7 @@ import type {
   AppConfig,
   ModelProfile,
   CommandInfo,
+  ExtensionInfo,
 } from "@/types";
 
 /* ── Chat Store ── */
@@ -58,7 +59,14 @@ export const useChatStore = create<ChatState>((set) => ({
   toolCalls: {},
   permissionRequest: null,
   tools: [],
-  tokenUsage: { message_count: 0, estimated_tokens: 0, max_tokens: 128000, compaction_count: 0 },
+  tokenUsage: {
+    message_count: 0,
+    estimated_tokens: 0,
+    max_tokens: 128000,
+    compaction_count: 0,
+    context_metrics: null,
+    provider_usage: null,
+  },
 
   addUserMessage: (text) =>
     set((s) => ({
@@ -152,6 +160,10 @@ interface PanelState {
   // Commands
   commands: CommandInfo[];
   setCommands: (cmds: CommandInfo[]) => void;
+
+  // Extensions
+  extensions: ExtensionInfo[];
+  setExtensions: (extensions: ExtensionInfo[]) => void;
 }
 
 export const usePanelStore = create<PanelState>((set) => ({
@@ -187,4 +199,7 @@ export const usePanelStore = create<PanelState>((set) => ({
 
   commands: [],
   setCommands: (commands) => set({ commands }),
+
+  extensions: [],
+  setExtensions: (extensions) => set({ extensions }),
 }));

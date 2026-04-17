@@ -76,10 +76,38 @@ class Agent:
     def _build_messages(self) -> list[ChatCompletionMessageParam]:
         if self.prompt_builder:
             prompt = self.prompt_builder.build()
+            prompt_metrics = self.prompt_builder.build_metrics()
             self.turn_runtime.set_memory_entry(self.prompt_builder.memory_entry_metadata)
         else:
             prompt = self.system_prompt
+            prompt_metrics = {
+                "system_prompt_chars": len(prompt),
+                "memory_chars": 0,
+                "session_summary_chars": 0,
+                "custom_instructions_chars": 0,
+                "extension_prompt_chars": 0,
+                "sections": [],
+            }
             self.turn_runtime.set_memory_entry(None)
+
+        message_chars = 0
+        tool_call_chars = 0
+        for message in self.messages:
+            message_chars += len(message.content or "")
+            if message.tool_calls:
+                tool_call_chars += len(str(message.tool_calls))
+
+        self.turn_runtime.set_prompt_context_metrics({
+            "system_prompt_chars": prompt_metrics["system_prompt_chars"],
+            "memory_chars": prompt_metrics["memory_chars"],
+            "session_summary_chars": prompt_metrics["session_summary_chars"],
+            "custom_instructions_chars": prompt_metrics["custom_instructions_chars"],
+            "extension_prompt_chars": prompt_metrics["extension_prompt_chars"],
+            "message_chars": message_chars,
+            "tool_call_chars": tool_call_chars,
+            "request_message_count": len(self.messages) + 1,
+            "system_prompt_sections": prompt_metrics["sections"],
+        })
         msgs: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": prompt},
         ]
@@ -147,6 +175,16 @@ class Agent:
             finish_reason: str | None = None
 
             async for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    provider_usage = {
+                        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+                        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+                        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+                    }
+                    if any(provider_usage.values()):
+                        self.turn_runtime.set_provider_usage(provider_usage)
+
                 choice = chunk.choices[0] if chunk.choices else None
                 if not choice:
                     continue

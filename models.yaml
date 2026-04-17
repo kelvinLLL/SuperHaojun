@@ -6,7 +6,7 @@
 #
 # Switch models in the WebUI (Settings tab) without restarting.
 
-default: step-flash
+default: gpt-oss-120b-free
 
 # ── Providers ────────────────────────────────────────────────────────────
 # Each provider defines a base_url + api_key.
@@ -33,6 +33,16 @@ providers:
 # Each model references a provider and specifies the model_id.
 
 models:
+  gpt-oss-20b-free:
+    name: "OpenAI: gpt-oss-20b (free)"
+    model_id: "openai/gpt-oss-20b:free"
+    provider: openrouter
+
+  gpt-oss-120b-free:
+    name: "OpenAI: gpt-oss-120b (free)"
+    model_id: "openai/gpt-oss-120b:free"
+    provider: openrouter
+
   step-flash:
     name: "Step 3.5 Flash (free)"
     model_id: "stepfun/step-3.5-flash:free"

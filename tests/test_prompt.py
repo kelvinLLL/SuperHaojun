@@ -322,6 +322,30 @@ class TestSystemPromptBuilderV2:
         prompt = builder.build()
         assert "User likes Python." in prompt
 
+    def test_exposes_prompt_build_metrics(self, tmp_path: Path) -> None:
+        specs = tmp_path / "specs"
+        specs.mkdir()
+        (specs / "development-rules.md").write_text("Explainability First.", encoding="utf-8")
+
+        builder = SystemPromptBuilder(
+            working_dir=str(tmp_path),
+            custom_instructions="Always explain your reasoning briefly.",
+            memory_text="User prefers concise summaries.",
+        )
+        builder.set_session_summary("Reviewed the current repo state.")
+        prompt = builder.build()
+        metrics = builder.build_metrics()
+
+        assert metrics["system_prompt_chars"] == len(prompt)
+        assert metrics["memory_chars"] == len("User prefers concise summaries.")
+        assert metrics["session_summary_chars"] == len("Reviewed the current repo state.")
+        assert metrics["custom_instructions_chars"] == len("Always explain your reasoning briefly.")
+        assert metrics["extension_prompt_chars"] == len("Explainability First.")
+        assert any(
+            section["name"] == "memory" and section["chars"] > 0
+            for section in metrics["sections"]
+        )
+
     def test_caching(self) -> None:
         builder = SystemPromptBuilder(working_dir="/tmp")
         first = builder.build()

@@ -17,6 +17,13 @@ from typing import Any
 from pydantic_settings import BaseSettings
 
 
+OPENROUTER_KEY_PREFIX_ALIASES = {
+    "sk-·-v1-": "sk-or-v1-",
+    "sk-•-v1-": "sk-or-v1-",
+    "sk-∙-v1-": "sk-or-v1-",
+}
+
+
 # ── Single-model env fallback ──────────────────────────────────────────────
 
 class EnvConfig(BaseSettings):
@@ -45,11 +52,31 @@ class ModelConfig:
     is_reasoning: bool = field(init=False)
 
     def __post_init__(self) -> None:
+        normalized_api_key = _normalize_api_key(self.api_key)
+        object.__setattr__(self, "api_key", normalized_api_key)
         object.__setattr__(
             self,
             "is_reasoning",
             bool(re.search(r"o[1-9]|gpt-5|step-3|deepseek-r", self.model_id)),
         )
+
+
+def _normalize_api_key(api_key: str) -> str:
+    normalized = api_key.strip()
+    for alias, canonical in OPENROUTER_KEY_PREFIX_ALIASES.items():
+        if normalized.startswith(alias):
+            normalized = canonical + normalized[len(alias):]
+            break
+
+    if normalized:
+        try:
+            normalized.encode("ascii")
+        except UnicodeEncodeError as exc:
+            raise ValueError(
+                "API keys must be ASCII after normalization. "
+                "Check for copied bullets, smart punctuation, or full-width characters."
+            ) from exc
+    return normalized
 
 
 # ── Multi-model registry ───────────────────────────────────────────────────

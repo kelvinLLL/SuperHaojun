@@ -19,12 +19,21 @@ function fetchCommands() {
     .catch(() => {});
 }
 
+function fetchExtensions() {
+  fetch("/api/extensions")
+    .then((r) => r.json())
+    .then((extensions) => usePanelStore.getState().setExtensions(extensions))
+    .catch(() => {});
+}
+
 function toTokenUsage(runtime: RuntimeState): TokenUsage {
   return {
     message_count: runtime.message_count,
     estimated_tokens: runtime.estimated_tokens,
     max_tokens: 128000,
     compaction_count: runtime.compaction_count,
+    context_metrics: runtime.prompt_context_metrics,
+    provider_usage: runtime.provider_usage,
   };
 }
 
@@ -49,6 +58,7 @@ export function useWebSocket() {
       console.log("[WS] Connected");
       fetchModels();
       fetchCommands();
+      fetchExtensions();
     };
 
     ws.onmessage = (event) => {
@@ -78,10 +88,12 @@ export function useWebSocket() {
           tools: msg.tools,
           tokenUsage: msg.token_usage ?? toTokenUsage(msg.runtime),
         });
+        usePanelStore.getState().setExtensions(msg.runtime.extensions ?? []);
         break;
 
       case "runtime_state":
         useChatStore.getState().setTokenUsage(toTokenUsage(msg.runtime));
+        usePanelStore.getState().setExtensions(msg.runtime.extensions ?? []);
         break;
 
       case "agent_start":

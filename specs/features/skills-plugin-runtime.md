@@ -2,7 +2,7 @@
 title: Skills Plugin Runtime
 status: active
 owner: Haojun
-last_updated: 2026-04-16
+last_updated: 2026-04-17
 source_paths:
   - src/superhaojun/extensions/runtime.py
   - src/superhaojun/commands/builtins.py
@@ -79,6 +79,17 @@ source_paths:
   - WebUI extras/runtime snapshots
 - The first user-facing control surface is `/extensions`, which now shows what is loaded, where it came from, and whether it is enabled. Enabling or disabling an extension invalidates prompt caches immediately.
 - Browser consumers can inspect the same extension state through WebUI runtime snapshots and `/api/extensions`, so extension loading is not hidden behind CLI-only tooling.
+- WebUI extension governance is now part of the feature boundary:
+  - browser users should be able to enable or disable repo-local extensions through explicit buttons instead of only slash commands
+  - the backend should expose extension-management endpoints that reuse the same `ExtensionRuntime.enable()` / `disable()` behavior and prompt-cache invalidation path as the slash command
+  - browser state should refresh from the authoritative runtime after each toggle instead of inventing a separate extension cache
+- This governance surface now shares the browser with built-in tool governance:
+  - tools and repo-local extensions are exposed as separate controls, but both are governed from the same settings surface
+  - disabling an extension removes its prompt contribution while preserving inspectable metadata
+  - disabling a tool removes it from subsequent tool advertisement without unregistering the underlying implementation object
+- Real-world verification for this feature now includes button-driven behavior, not only CLI parity:
+  - extension toggles are covered by WebUI endpoint tests
+  - browser approval flows can now be tested against a live model profile that emits real tool calls before write execution
 - This feature deliberately stays local and inspectable. It does not add marketplace, remote sync, or arbitrary code execution.
 
 ## Open Questions
@@ -96,9 +107,10 @@ source_paths:
   - loaded extension sources are visible to users
   - disabled extensions do not silently affect prompt or runtime behavior
   - prompt cache invalidation happens when extension state changes
+  - slash-command and button-driven toggles keep the same runtime result
+  - tool-governance toggles do not silently re-advertise disabled tools
   - repo-local extensions remain local and do not require remote infrastructure
 
 ## Follow-ups
 
-- Revisit whether repo-local extensions should eventually get a dedicated WebUI management panel instead of only API/runtime exposure.
 - Revisit whether this local runtime should later subsume more spec-driven assets once real usage patterns settle.

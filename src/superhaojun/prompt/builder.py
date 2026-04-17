@@ -65,6 +65,7 @@ class SystemPromptBuilder:
         self._sections = sections if sections is not None else _default_sections()
         self._cached_static: str | None = None
         self._cached_full: str | None = None
+        self._cached_metrics: dict[str, Any] | None = None
         self._session_summary: str = ""
 
     @property
@@ -123,11 +124,19 @@ class SystemPromptBuilder:
 
         cacheable_parts: list[str] = []
         uncacheable_parts: list[str] = []
+        sections_metadata: list[dict[str, Any]] = []
 
         for section in self._sections:
             content = section.build(ctx)
             if content is None:
                 continue
+            sections_metadata.append(
+                {
+                    "name": section.name,
+                    "chars": len(content),
+                    "cacheable": section.cacheable,
+                }
+            )
             if section.cacheable:
                 cacheable_parts.append(content)
             else:
@@ -139,12 +148,35 @@ class SystemPromptBuilder:
             parts.extend(uncacheable_parts)
 
         self._cached_full = "\n\n".join(parts)
+        self._cached_metrics = {
+            "system_prompt_chars": len(self._cached_full),
+            "memory_chars": len(self._memory_text),
+            "session_summary_chars": len(self._session_summary),
+            "custom_instructions_chars": len(self._custom_instructions),
+            "extension_prompt_chars": len(self._extension_runtime.prompt_text()),
+            "sections": sections_metadata,
+        }
         return self._cached_full
+
+    def build_metrics(self) -> dict[str, Any]:
+        """Expose prompt assembly metrics for explainability surfaces."""
+        if self._cached_metrics is None:
+            self.build()
+        assert self._cached_metrics is not None
+        return {
+            "system_prompt_chars": self._cached_metrics["system_prompt_chars"],
+            "memory_chars": self._cached_metrics["memory_chars"],
+            "session_summary_chars": self._cached_metrics["session_summary_chars"],
+            "custom_instructions_chars": self._cached_metrics["custom_instructions_chars"],
+            "extension_prompt_chars": self._cached_metrics["extension_prompt_chars"],
+            "sections": [dict(section) for section in self._cached_metrics["sections"]],
+        }
 
     def invalidate(self) -> None:
         """Force rebuild on next build() call."""
         self._cached_static = None
         self._cached_full = None
+        self._cached_metrics = None
 
     def register_section(self, section: PromptSection) -> None:
         """Add a section to the registry."""

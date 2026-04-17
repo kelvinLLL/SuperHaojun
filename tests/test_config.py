@@ -50,6 +50,24 @@ class TestModelConfig:
         with pytest.raises(AttributeError):
             cfg.provider = "other"  # type: ignore[misc]
 
+    def test_normalizes_openrouter_key_with_middle_dot_prefix(self) -> None:
+        cfg = ModelConfig(
+            provider="openai",
+            model_id="gpt-4o",
+            base_url="https://openrouter.ai/api/v1",
+            api_key="sk-·-v1-test",
+        )
+        assert cfg.api_key == "sk-or-v1-test"
+
+    def test_rejects_non_ascii_api_keys_after_normalization(self) -> None:
+        with pytest.raises(ValueError, match="ASCII"):
+            ModelConfig(
+                provider="openai",
+                model_id="gpt-4o",
+                base_url="https://openrouter.ai/api/v1",
+                api_key="sk-or-v1-tést",
+            )
+
     def test_load_config_from_env(self, monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
         # chdir to tmp_path so no models.yaml is found; falls back to .env
         monkeypatch.chdir(tmp_path)

@@ -2,7 +2,7 @@
 title: WebUI Chat
 status: active
 owner: Haojun
-last_updated: 2026-04-16
+last_updated: 2026-04-17
 source_paths:
   - src/superhaojun/webui/server.py
   - src/superhaojun/webui/static/index.html
@@ -13,6 +13,7 @@ source_paths:
   - webui/src/stores/index.ts
   - webui/src/components/chat/ChatView.tsx
   - webui/src/components/chat/ChatInput.tsx
+  - webui/src/components/tools/ToolsView.tsx
   - webui/src/types/index.ts
 ---
 
@@ -77,6 +78,15 @@ source_paths:
   - tool calls are tracked separately from plain chat messages
   - permission requests open a modal that round-trips `permission_response`
   - runtime snapshots update token usage from the shared backend runtime instead of browser-local estimation
+- The right-side observability surface is a product contract, not a convenience counter:
+  - browser-visible context data must distinguish harness-internal prompt/context accounting from model-provider usage
+  - prompt/context accounting should explain what the harness is sending, such as assembled system prompt size, transcript contribution, memory contribution, and repo-local extension contribution
+  - provider usage should be shown separately and only when the upstream API returned real usage metadata
+  - rough fallback estimates may still exist internally, but the UI must not present them as if they were provider-truth token usage
+- The observability surface now reflects implemented behavior rather than planned behavior:
+  - the sidebar shows prompt-context buckets such as system prompt, transcript, tool calls, memory, session summary, custom instructions, and skills or extension contribution
+  - provider usage is rendered separately from harness context accounting
+  - when the provider fails before returning usage, prompt-context metrics still remain visible because they are captured before request dispatch
 - Browser interrupt should stay explainable and lightweight:
   - the frontend sends an `interrupt` WebSocket message
   - the backend tracks and cancels the active agent task rather than inventing a second agent loop
@@ -85,9 +95,22 @@ source_paths:
   - the chat input swaps its send affordance for an explicit stop control while streaming is active
 - REST endpoints provide supporting panel data for tools, MCP status, hooks, diagnostics, model profiles, config, and command metadata.
 - WebUI runtime snapshots now also include loaded repo-local extension metadata, and `/api/extensions` exposes the same extension list for browser consumers.
+- Repo-local extension governance belongs in the WebUI rather than only slash commands:
+  - browser users should be able to inspect extension state and toggle enabled or disabled directly from buttons
+  - extension toggles must mutate the shared runtime state and immediately invalidate prompt caches the same way slash-command toggles do
+  - built-in tools should be governable from the same browser surface so operators can disable risky tools without dropping to slash commands
+  - tool toggles should update the runtime registry immediately and remove disabled tools from subsequent tool advertisement
+- Permission approval remains part of the core browser contract:
+  - approval requests are still rendered as explicit modal actions instead of asking the user to type approval text into the chat stream
+  - the WebSocket contract now has regression coverage for `permission_request -> permission_response -> agent resumes`
+  - this flow has also been verified against a live tool-calling model profile rather than only mocked bus events
+- Model-profile stability affects browser verification and therefore belongs in this feature:
+  - the current OpenRouter default has been moved to a profile that was verified to complete normal turns and write-tool approval flows during this optimization pass
+  - provider availability still fluctuates, so the browser must continue to surface real upstream `404` and `429` failures instead of masking them as internal harness bugs
 - Browser-shell polish belongs to this feature when it affects live verification:
   - the served HTML shell should include a stable favicon reference so normal page loads do not produce avoidable 404 noise
   - browser console output should reserve `error` logging for real failures rather than expected user-driven terminal states
+  - normal chat turns must not fail on non-ASCII metadata that the UI or runtime emits elsewhere
 
 ## Open Questions
 
@@ -101,6 +124,10 @@ source_paths:
   - message send still appends an optimistic user message
   - tool-call start and end cards still update correctly
   - permission prompts still appear and clear
+  - context panels separate prompt/context metrics from provider usage
+  - extension enable and disable buttons update the UI without a full reload
+  - tool enable and disable buttons update the UI and change subsequent tool availability
+  - permission modal approval resumes the underlying agent task instead of leaving the turn hung
   - interrupt clears the active stream and leaves the transcript in a readable terminal state
   - interrupt does not create avoidable browser-console error noise for expected user cancellation
   - `/model` and other slash commands still return `command_response` events

@@ -1,22 +1,34 @@
-import { useState, useEffect } from "react";
-import { usePanelStore } from "@/stores";
+import { useEffect, useState } from "react";
+import { useChatStore, usePanelStore } from "@/stores";
 import type { AppConfig, ModelProfile } from "@/types";
-import { Settings as SettingsIcon, Cpu, Database, Sparkles, Check, Zap, RefreshCw } from "lucide-react";
+import {
+  Check,
+  Cpu,
+  RefreshCw,
+  Settings as SettingsIcon,
+  Sparkles,
+  Wrench,
+  Zap,
+} from "lucide-react";
 
 export function SettingsView() {
-  const { config, setConfig, models, setModels } = usePanelStore();
+  const { config, setConfig, models, setModels, extensions, setExtensions } = usePanelStore();
+  const { tools, setTools } = useChatStore();
   const [switching, setSwitching] = useState<string | null>(null);
+  const [toolBusy, setToolBusy] = useState<string | null>(null);
+  const [extensionBusy, setExtensionBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/config")
+    refreshConfig(setConfig, setModels);
+    fetch("/api/extensions")
       .then((r) => r.json())
-      .then(setConfig)
+      .then(setExtensions)
       .catch(() => {});
-    fetch("/api/config/models")
+    fetch("/api/tools")
       .then((r) => r.json())
-      .then(setModels)
+      .then(setTools)
       .catch(() => {});
-  }, []);
+  }, [setConfig, setExtensions, setModels, setTools]);
 
   const handleSwitch = async (key: string) => {
     setSwitching(key);
@@ -26,13 +38,7 @@ export function SettingsView() {
       });
       const data = await res.json();
       if (data.ok) {
-        // Refresh models list and config
-        const [modelsRes, configRes] = await Promise.all([
-          fetch("/api/config/models"),
-          fetch("/api/config"),
-        ]);
-        setModels(await modelsRes.json());
-        setConfig(await configRes.json());
+        await refreshConfig(setConfig, setModels);
       }
     } catch (err) {
       console.error("Switch failed:", err);
@@ -41,27 +47,54 @@ export function SettingsView() {
     }
   };
 
+  const handleToolToggle = async (name: string, enabled: boolean) => {
+    setToolBusy(name);
+    try {
+      const res = await fetch("/api/tools/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, enabled }),
+      });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.tools)) {
+        setTools(data.tools);
+      }
+    } catch (err) {
+      console.error("Tool toggle failed:", err);
+    } finally {
+      setToolBusy(null);
+    }
+  };
+
+  const handleExtensionToggle = async (id: string, enabled: boolean) => {
+    setExtensionBusy(id);
+    try {
+      const res = await fetch("/api/extensions/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, enabled }),
+      });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.extensions)) {
+        setExtensions(data.extensions);
+      }
+    } catch (err) {
+      console.error("Extension toggle failed:", err);
+    } finally {
+      setExtensionBusy(null);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto px-5 py-4 space-y-6">
-      {/* Model Profiles */}
       <section>
-        <div className="flex items-center gap-2 mb-3">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: "rgba(122, 162, 247, 0.1)" }}
-          >
-            <Zap size={14} style={{ color: "var(--accent-blue)" }} />
-          </div>
-          <h2 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            Model Profiles
-          </h2>
-          <span
-            className="ml-auto text-[10px] px-2 py-0.5 rounded-full"
-            style={{ background: "var(--bg-elevated)", color: "var(--text-dim)" }}
-          >
-            {models.length} available
-          </span>
-        </div>
+        <SectionHeader
+          icon={Zap}
+          title="Model Profiles"
+          badge={`${models.length} available`}
+          tint="rgba(122, 162, 247, 0.1)"
+          color="var(--accent-blue)"
+        />
         <div className="space-y-2">
           {models.map((m) => (
             <button
@@ -75,13 +108,6 @@ export function SettingsView() {
                   : "1px solid var(--border-subtle)",
                 cursor: m.active ? "default" : "pointer",
                 opacity: switching && switching !== m.key ? 0.5 : 1,
-              }}
-              onMouseEnter={(e) => {
-                if (!m.active) e.currentTarget.style.borderColor = "var(--border)";
-              }}
-              onMouseLeave={(e) => {
-                if (!m.active)
-                  e.currentTarget.style.borderColor = "var(--border-subtle)";
               }}
             >
               <div className="flex items-center gap-3">
@@ -109,17 +135,7 @@ export function SettingsView() {
                     >
                       {m.name}
                     </span>
-                    {m.active && (
-                      <span
-                        className="text-[9px] px-1.5 py-0.5 rounded-full font-medium"
-                        style={{
-                          background: "rgba(122, 162, 247, 0.15)",
-                          color: "var(--accent-blue)",
-                        }}
-                      >
-                        ACTIVE
-                      </span>
-                    )}
+                    {m.active && <Pill text="ACTIVE" color="var(--accent-blue)" bg="rgba(122, 162, 247, 0.15)" />}
                   </div>
                   <div className="text-[11px] mt-0.5" style={{ color: "var(--text-dim)" }}>
                     {m.provider} · {m.model_id}
@@ -128,28 +144,16 @@ export function SettingsView() {
               </div>
             </button>
           ))}
-          {models.length === 0 && (
-            <div className="flex items-center gap-2 text-xs p-4" style={{ color: "var(--text-dim)" }}>
-              <div className="w-3 h-3 rounded-full animate-pulse" style={{ background: "var(--accent-blue)" }} />
-              Loading models...
-            </div>
-          )}
         </div>
       </section>
 
-      {/* Current Config */}
       <section>
-        <div className="flex items-center gap-2 mb-3">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: "rgba(187, 154, 247, 0.1)" }}
-          >
-            <Cpu size={14} style={{ color: "var(--accent-magenta)" }} />
-          </div>
-          <h2 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            Active Configuration
-          </h2>
-        </div>
+        <SectionHeader
+          icon={Cpu}
+          title="Active Configuration"
+          tint="rgba(187, 154, 247, 0.1)"
+          color="var(--accent-magenta)"
+        />
         <div
           className="rounded-xl p-4 space-y-4"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
@@ -161,27 +165,66 @@ export function SettingsView() {
               <Field label="Base URL" value={config.base_url} />
             </>
           ) : (
-            <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-dim)" }}>
-              <div className="w-3 h-3 rounded-full animate-pulse" style={{ background: "var(--accent-blue)" }} />
-              Loading...
-            </div>
+            <LoadingHint />
           )}
         </div>
       </section>
 
-      {/* About */}
       <section>
-        <div className="flex items-center gap-2 mb-3">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: "rgba(125, 207, 255, 0.1)" }}
-          >
-            <Sparkles size={14} style={{ color: "var(--accent-cyan)" }} />
-          </div>
-          <h2 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-            About
-          </h2>
-        </div>
+        <SectionHeader
+          icon={Wrench}
+          title="Tool Governance"
+          badge={`${tools.filter((tool) => tool.enabled !== false).length}/${tools.length} enabled`}
+          tint="rgba(224, 175, 104, 0.12)"
+          color="var(--accent-yellow)"
+        />
+        <GovernanceCard>
+          {tools.map((tool) => (
+            <ToggleRow
+              key={tool.name}
+              title={tool.name}
+              subtitle={`${tool.risk_level ?? "read"} tool`}
+              enabled={tool.enabled !== false}
+              busy={toolBusy === tool.name}
+              onToggle={() => handleToolToggle(tool.name, tool.enabled === false)}
+            />
+          ))}
+          {tools.length === 0 && <LoadingHint text="Loading tools..." />}
+        </GovernanceCard>
+      </section>
+
+      <section>
+        <SectionHeader
+          icon={SettingsIcon}
+          title="Skills & Extensions"
+          badge={`${extensions.filter((entry) => entry.enabled).length}/${extensions.length} enabled`}
+          tint="rgba(125, 207, 255, 0.1)"
+          color="var(--accent-cyan)"
+        />
+        <GovernanceCard>
+          {extensions.map((entry) => (
+            <ToggleRow
+              key={entry.id}
+              title={entry.name}
+              subtitle={`${entry.kind} · ${entry.scope}`}
+              enabled={entry.enabled}
+              busy={extensionBusy === entry.id}
+              onToggle={() => handleExtensionToggle(entry.id, !entry.enabled)}
+              detail={entry.source}
+              badge={entry.prompt_enabled ? "prompt" : "metadata"}
+            />
+          ))}
+          {extensions.length === 0 && <LoadingHint text="No repo-local skills or extensions discovered." />}
+        </GovernanceCard>
+      </section>
+
+      <section>
+        <SectionHeader
+          icon={Sparkles}
+          title="About"
+          tint="rgba(125, 207, 255, 0.1)"
+          color="var(--accent-cyan)"
+        />
         <div
           className="rounded-xl p-4 space-y-3 text-xs"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
@@ -209,6 +252,146 @@ export function SettingsView() {
   );
 }
 
+async function refreshConfig(
+  setConfig: (config: AppConfig) => void,
+  setModels: (models: ModelProfile[]) => void,
+) {
+  const [configRes, modelsRes] = await Promise.all([
+    fetch("/api/config"),
+    fetch("/api/config/models"),
+  ]);
+  setConfig(await configRes.json());
+  setModels(await modelsRes.json());
+}
+
+function SectionHeader({
+  icon: Icon,
+  title,
+  badge,
+  tint,
+  color,
+}: {
+  icon: typeof Cpu;
+  title: string;
+  badge?: string;
+  tint: string;
+  color: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <div
+        className="w-7 h-7 rounded-lg flex items-center justify-center"
+        style={{ background: tint }}
+      >
+        <Icon size={14} style={{ color }} />
+      </div>
+      <h2 className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+        {title}
+      </h2>
+      {badge ? (
+        <span
+          className="ml-auto text-[10px] px-2 py-0.5 rounded-full"
+          style={{ background: "var(--bg-elevated)", color: "var(--text-dim)" }}
+        >
+          {badge}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function GovernanceCard({ children }: { children: import("react").ReactNode }) {
+  return (
+    <div
+      className="rounded-xl p-3 space-y-2"
+      style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function ToggleRow({
+  title,
+  subtitle,
+  enabled,
+  busy,
+  onToggle,
+  detail,
+  badge,
+}: {
+  title: string;
+  subtitle: string;
+  enabled: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  detail?: string;
+  badge?: string;
+}) {
+  return (
+    <div
+      className="rounded-xl p-3 flex items-start gap-3"
+      style={{ background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)" }}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <div className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+            {title}
+          </div>
+          {badge ? <Pill text={badge} color="var(--accent-cyan)" bg="rgba(125, 207, 255, 0.12)" /> : null}
+          <Pill
+            text={enabled ? "ON" : "OFF"}
+            color={enabled ? "var(--accent-green)" : "var(--text-dim)"}
+            bg={enabled ? "rgba(158, 206, 106, 0.12)" : "var(--bg-hover)"}
+          />
+        </div>
+        <div className="text-[11px] mt-0.5" style={{ color: "var(--text-dim)" }}>
+          {subtitle}
+        </div>
+        {detail ? (
+          <div className="text-[10px] mt-1 font-mono truncate" style={{ color: "var(--text-dim)" }}>
+            {detail}
+          </div>
+        ) : null}
+      </div>
+
+      <button
+        onClick={onToggle}
+        disabled={busy}
+        className="px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all duration-200"
+        style={{
+          background: enabled ? "rgba(247, 118, 142, 0.12)" : "rgba(158, 206, 106, 0.12)",
+          color: enabled ? "var(--accent-red)" : "var(--accent-green)",
+          border: "1px solid var(--border-subtle)",
+          opacity: busy ? 0.6 : 1,
+        }}
+      >
+        {busy ? "Working..." : enabled ? "Disable" : "Enable"}
+      </button>
+    </div>
+  );
+}
+
+function Pill({ text, color, bg }: { text: string; color: string; bg: string }) {
+  return (
+    <span
+      className="text-[9px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider"
+      style={{ background: bg, color }}
+    >
+      {text}
+    </span>
+  );
+}
+
+function LoadingHint({ text = "Loading..." }: { text?: string }) {
+  return (
+    <div className="flex items-center gap-2 text-xs" style={{ color: "var(--text-dim)" }}>
+      <div className="w-3 h-3 rounded-full animate-pulse" style={{ background: "var(--accent-blue)" }} />
+      {text}
+    </div>
+  );
+}
+
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -218,8 +401,10 @@ function Field({ label, value }: { label: string; value: string }) {
       <div
         className="text-xs font-mono px-3 py-2 rounded-lg"
         style={{
-          color: "var(--text-primary)",
           background: "var(--bg-secondary)",
+          color: "var(--text-secondary)",
+          border: "1px solid var(--border-subtle)",
+          wordBreak: "break-all",
         }}
       >
         {value}

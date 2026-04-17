@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -138,6 +138,16 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
     async def get_tools() -> list[dict[str, Any]]:
         return _get_tools_list(state)
 
+    @app.post("/api/tools/state")
+    async def set_tool_state(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        tool_name = str(payload.get("name", "")).strip()
+        enabled = payload.get("enabled")
+        if not tool_name or not isinstance(enabled, bool):
+            return {"ok": False, "error": "Expected JSON body with string name and boolean enabled", "tools": _get_tools_list(state)}
+
+        ok = state.agent.registry.enable(tool_name) if enabled else state.agent.registry.disable(tool_name)
+        return {"ok": ok, "tools": _get_tools_list(state)}
+
     @app.get("/api/mcp/status")
     async def get_mcp_status() -> list[dict[str, Any]]:
         mgr = getattr(app.state, "mcp_manager", None)
@@ -185,6 +195,23 @@ def create_app(agent: Agent, bus: MessageBus, **extras: Any) -> FastAPI:
         if runtime is None:
             return []
         return runtime.list_extensions()
+
+    @app.post("/api/extensions/state")
+    async def set_extension_state(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        runtime = getattr(app.state, "extension_runtime", None)
+        if runtime is None:
+            return {"ok": False, "error": "No extension runtime", "extensions": []}
+
+        extension_id = str(payload.get("id", "")).strip()
+        enabled = payload.get("enabled")
+        if not extension_id or not isinstance(enabled, bool):
+            return {"ok": False, "error": "Expected JSON body with string id and boolean enabled", "extensions": runtime.list_extensions()}
+
+        ok = runtime.enable(extension_id) if enabled else runtime.disable(extension_id)
+        if ok and state.agent.prompt_builder is not None:
+            state.agent.prompt_builder.invalidate()
+
+        return {"ok": ok, "extensions": runtime.list_extensions()}
 
     @app.get("/api/hooks/log")
     async def get_hook_log() -> list[dict[str, Any]]:
@@ -432,14 +459,7 @@ def _get_messages(state: WebUIState) -> list[dict[str, Any]]:
 
 
 def _get_tools_list(state: WebUIState) -> list[dict[str, Any]]:
-    tools = []
-    for td in state.agent.registry.to_openai_tools():
-        fn = td.get("function", {})
-        tools.append({
-            "name": fn.get("name", ""),
-            "description": fn.get("description", ""),
-        })
-    return tools
+    return state.agent.registry.list_tools()
 
 
 def _get_token_usage(state: WebUIState) -> dict[str, Any]:
@@ -450,6 +470,8 @@ def _get_token_usage(state: WebUIState) -> dict[str, Any]:
         "estimated_tokens": runtime["estimated_tokens"],
         "max_tokens": max_tokens,
         "compaction_count": runtime["compaction_count"],
+        "context_metrics": runtime["prompt_context_metrics"],
+        "provider_usage": runtime["provider_usage"],
     }
 
 

@@ -29,6 +29,42 @@ export interface ToolCallData {
 export interface ToolInfo {
   name: string;
   description: string;
+  risk_level?: string;
+  enabled?: boolean;
+}
+
+export interface PromptContextSection {
+  name: string;
+  chars: number;
+  cacheable?: boolean;
+}
+
+export interface PromptContextMetrics {
+  system_prompt_chars: number;
+  memory_chars: number;
+  session_summary_chars: number;
+  custom_instructions_chars: number;
+  extension_prompt_chars: number;
+  message_chars: number;
+  tool_call_chars: number;
+  request_message_count?: number;
+  system_prompt_sections: PromptContextSection[];
+}
+
+export interface ProviderUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+export interface ExtensionInfo {
+  id: string;
+  kind: string;
+  name: string;
+  source: string;
+  scope: string;
+  enabled: boolean;
+  prompt_enabled: boolean;
 }
 
 export interface MCPServerStatus {
@@ -84,6 +120,8 @@ export interface TokenUsage {
   estimated_tokens: number;
   max_tokens: number;
   compaction_count: number;
+  context_metrics: PromptContextMetrics | null;
+  provider_usage: ProviderUsage | null;
 }
 
 export interface RuntimeState {
@@ -97,6 +135,8 @@ export interface RuntimeState {
   tool_statuses: Array<Record<string, string | null>>;
   message_count: number;
   estimated_tokens: number;
+  prompt_context_metrics: PromptContextMetrics | null;
+  provider_usage: ProviderUsage | null;
   current_turn_text_tokens: number;
   current_turn_reasoning_tokens: number;
   compaction_pending: boolean;
@@ -106,6 +146,7 @@ export interface RuntimeState {
   started_at: number | null;
   ended_at: number | null;
   last_error: string | null;
+  extensions?: ExtensionInfo[];
 }
 
 export interface AppConfig {

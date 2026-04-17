@@ -21,7 +21,7 @@ from superhaojun.webui.server import WebUIState, _get_runtime_state, _get_token_
 
 
 def _make_chunk(content: str | None = None, finish_reason: str | None = None,
-                tool_calls: list[object] | None = None):
+                tool_calls: list[object] | None = None, usage: object | None = None):
     delta = MagicMock()
     delta.content = content
     delta.tool_calls = tool_calls
@@ -32,6 +32,7 @@ def _make_chunk(content: str | None = None, finish_reason: str | None = None,
 
     chunk = MagicMock()
     chunk.choices = [choice]
+    chunk.usage = usage
     return chunk
 
 
@@ -144,6 +145,28 @@ async def test_agent_tracks_turn_runtime_for_text_response(agent: Agent) -> None
     assert agent.turn_runtime.active is False
     assert agent.turn_runtime.message_count == 2
     assert agent.turn_runtime.estimated_tokens > 0
+
+
+@pytest.mark.asyncio
+async def test_agent_tracks_provider_usage_from_stream(agent: Agent) -> None:
+    usage = MagicMock(prompt_tokens=111, completion_tokens=7, total_tokens=118)
+    chunks = [
+        _make_chunk(content="Hello"),
+        _make_chunk(finish_reason="stop", usage=usage),
+    ]
+    mock_stream = _AsyncStreamIter(chunks)
+
+    with patch.object(agent, "_client") as mock_client:
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_stream)
+        agent._client = mock_client
+
+        await agent.handle_user_message("hi")
+
+    assert agent.turn_runtime.provider_usage == {
+        "prompt_tokens": 111,
+        "completion_tokens": 7,
+        "total_tokens": 118,
+    }
 
 
 @pytest.mark.asyncio
@@ -265,6 +288,20 @@ def test_webui_runtime_snapshot_uses_agent_turn_runtime(agent: Agent, bus: Messa
     agent.turn_runtime.message_count = 4
     agent.turn_runtime.estimated_tokens = 120
     agent.turn_runtime.compaction_count = 2
+    agent.turn_runtime.set_prompt_context_metrics({
+        "system_prompt_chars": 600,
+        "message_chars": 180,
+        "tool_call_chars": 32,
+        "system_prompt_sections": [
+            {"name": "identity", "chars": 220},
+            {"name": "memory", "chars": 40},
+        ],
+    })
+    agent.turn_runtime.set_provider_usage({
+        "prompt_tokens": 111,
+        "completion_tokens": 7,
+        "total_tokens": 118,
+    })
 
     runtime = _get_runtime_state(state)
     token_usage = _get_token_usage(state)
@@ -275,7 +312,34 @@ def test_webui_runtime_snapshot_uses_agent_turn_runtime(agent: Agent, bus: Messa
     assert runtime["message_count"] == 4
     assert runtime["estimated_tokens"] == 120
     assert runtime["compaction_count"] == 2
+    assert runtime["prompt_context_metrics"] == {
+        "system_prompt_chars": 600,
+        "message_chars": 180,
+        "tool_call_chars": 32,
+        "system_prompt_sections": [
+            {"name": "identity", "chars": 220},
+            {"name": "memory", "chars": 40},
+        ],
+    }
+    assert runtime["provider_usage"] == {
+        "prompt_tokens": 111,
+        "completion_tokens": 7,
+        "total_tokens": 118,
+    }
     assert runtime["extensions"] == [{"id": "instruction:SUPERHAOJUN.md", "enabled": True}]
     assert token_usage["message_count"] == 4
-    assert token_usage["estimated_tokens"] == 120
+    assert token_usage["context_metrics"] == {
+        "system_prompt_chars": 600,
+        "message_chars": 180,
+        "tool_call_chars": 32,
+        "system_prompt_sections": [
+            {"name": "identity", "chars": 220},
+            {"name": "memory", "chars": 40},
+        ],
+    }
+    assert token_usage["provider_usage"] == {
+        "prompt_tokens": 111,
+        "completion_tokens": 7,
+        "total_tokens": 118,
+    }
     assert token_usage["compaction_count"] == 2

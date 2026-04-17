@@ -27,6 +27,8 @@ class TurnRuntimeState:
     tool_statuses: list[dict[str, str | None]] = field(default_factory=list)
     message_count: int = 0
     estimated_tokens: int = 0
+    prompt_context_metrics: dict[str, Any] | None = None
+    provider_usage: dict[str, int] | None = None
     current_turn_text_tokens: int = 0
     current_turn_reasoning_tokens: int = 0
     compaction_pending: bool = False
@@ -49,6 +51,7 @@ class TurnRuntimeState:
         self.tool_statuses.clear()
         self.current_turn_text_tokens = 0
         self.current_turn_reasoning_tokens = 0
+        self.provider_usage = None
         self.memory_entry = None
         self.active = True
         self.started_at = time.time()
@@ -122,6 +125,15 @@ class TurnRuntimeState:
         self.estimated_tokens = total
         self.compaction_pending = compaction_pending
 
+    def set_prompt_context_metrics(self, metrics: dict[str, Any] | None) -> None:
+        self.prompt_context_metrics = None if metrics is None else {
+            key: [dict(item) for item in value] if isinstance(value, list) else value
+            for key, value in metrics.items()
+        }
+
+    def set_provider_usage(self, usage: dict[str, int] | None) -> None:
+        self.provider_usage = None if usage is None else dict(usage)
+
     def record_compaction(
         self,
         *,
@@ -179,6 +191,8 @@ class TurnRuntimeState:
         self.compaction_pending = False
         self.compaction_count = 0
         self.last_compaction = None
+        self.prompt_context_metrics = None
+        self.provider_usage = None
         self.memory_entry = None
         self.active = False
         self.started_at = None
@@ -197,6 +211,15 @@ class TurnRuntimeState:
             "tool_statuses": [dict(entry) for entry in self.tool_statuses],
             "message_count": self.message_count,
             "estimated_tokens": self.estimated_tokens,
+            "prompt_context_metrics": (
+                {
+                    key: [dict(item) for item in value] if isinstance(value, list) else value
+                    for key, value in self.prompt_context_metrics.items()
+                }
+                if self.prompt_context_metrics
+                else None
+            ),
+            "provider_usage": dict(self.provider_usage) if self.provider_usage else None,
             "current_turn_text_tokens": self.current_turn_text_tokens,
             "current_turn_reasoning_tokens": self.current_turn_reasoning_tokens,
             "compaction_pending": self.compaction_pending,

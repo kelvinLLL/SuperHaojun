@@ -1,5 +1,9 @@
 import { useChatStore, usePanelStore } from "@/stores";
-import { Activity, Cpu, Zap, Wrench, Command } from "lucide-react";
+import { Activity, Binary, Braces, Command, Cpu, Wrench, Zap } from "lucide-react";
+
+function formatChars(value: number | undefined) {
+  return typeof value === "number" ? value.toLocaleString() : "0";
+}
 
 export function Sidebar() {
   const { sidebarOpen } = usePanelStore();
@@ -7,69 +11,97 @@ export function Sidebar() {
 
   if (!sidebarOpen) return null;
 
-  const pct = tokenUsage.max_tokens > 0
-    ? Math.round((tokenUsage.estimated_tokens / tokenUsage.max_tokens) * 100)
-    : 0;
-
+  const contextMetrics = tokenUsage.context_metrics;
+  const providerUsage = tokenUsage.provider_usage;
   const activeToolCalls = Object.values(toolCalls).filter((t) => !t.done);
+  const enabledTools = tools.filter((tool) => tool.enabled !== false);
 
   return (
     <aside
-      className="w-60 shrink-0 overflow-y-auto"
+      className="w-72 shrink-0 overflow-y-auto"
       style={{
         borderLeft: "1px solid var(--border-subtle)",
         background: "var(--bg-secondary)",
       }}
     >
-      {/* Token Usage */}
-      <section className="p-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+      <section className="p-4 space-y-3" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
         <h3
-          className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
+          className="text-[11px] uppercase tracking-widest flex items-center gap-1.5 font-medium"
           style={{ color: "var(--text-dim)" }}
         >
-          <Cpu size={11} /> Context
+          <Binary size={11} /> Prompt Context
         </h3>
-        <div className="mb-2">
-          <div className="flex justify-between text-[12px] mb-1.5">
-            <span style={{ color: "var(--text-secondary)" }}>
-              {tokenUsage.estimated_tokens.toLocaleString()}
-            </span>
-            <span
-              className="font-medium"
-              style={{
-                color: pct > 80 ? "var(--accent-red)" :
-                       pct > 60 ? "var(--accent-yellow)" :
-                       "var(--text-dim)",
-              }}
-            >
-              {pct}%
-            </span>
-          </div>
-          <div
-            className="h-1 rounded-full overflow-hidden"
-            style={{ background: "var(--bg-primary)" }}
-          >
+
+        {contextMetrics ? (
+          <>
             <div
-              className="h-full rounded-full transition-all duration-700 ease-out"
-              style={{
-                width: `${Math.min(pct, 100)}%`,
-                background:
-                  pct > 80
-                    ? "linear-gradient(90deg, var(--accent-orange), var(--accent-red))"
-                    : pct > 60
-                    ? "linear-gradient(90deg, var(--accent-yellow), var(--accent-orange))"
-                    : "linear-gradient(90deg, var(--accent-blue), var(--accent-cyan))",
-              }}
-            />
-          </div>
-        </div>
-        <div className="flex justify-between text-[10px]" style={{ color: "var(--text-dim)" }}>
-          <span>{tokenUsage.message_count} messages</span>
-          <span>{tokenUsage.compaction_count} compacts</span>
-        </div>
+              className="rounded-xl p-3 space-y-2"
+              style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+            >
+              <MetricRow label="System prompt" value={`${formatChars(contextMetrics.system_prompt_chars)} chars`} />
+              <MetricRow label="Transcript" value={`${formatChars(contextMetrics.message_chars)} chars`} />
+              <MetricRow label="Tool calls" value={`${formatChars(contextMetrics.tool_call_chars)} chars`} />
+              <MetricRow label="Messages" value={`${tokenUsage.message_count} in context`} />
+              <MetricRow label="Compactions" value={`${tokenUsage.compaction_count}`} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <MiniCard title="Memory" value={`${formatChars(contextMetrics.memory_chars)} chars`} icon={Cpu} />
+              <MiniCard title="Skills" value={`${formatChars(contextMetrics.extension_prompt_chars)} chars`} icon={Zap} />
+              <MiniCard title="Session" value={`${formatChars(contextMetrics.session_summary_chars)} chars`} icon={Braces} />
+              <MiniCard
+                title="Custom"
+                value={`${formatChars(contextMetrics.custom_instructions_chars)} chars`}
+                icon={Command}
+              />
+            </div>
+
+            <div
+              className="rounded-xl p-3 space-y-2"
+              style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+            >
+              <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--text-dim)" }}>
+                Prompt Sections
+              </div>
+              <div className="space-y-1.5">
+                {contextMetrics.system_prompt_sections.map((section) => (
+                  <MetricRow
+                    key={section.name}
+                    label={section.name}
+                    value={`${formatChars(section.chars)} chars`}
+                    accent={section.cacheable ? "var(--accent-cyan)" : "var(--accent-yellow)"}
+                  />
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <EmptyHint text="Prompt/context metrics appear after the agent assembles a request." />
+        )}
       </section>
 
-      {/* Status */}
+      <section className="p-4 space-y-3" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+        <h3
+          className="text-[11px] uppercase tracking-widest flex items-center gap-1.5 font-medium"
+          style={{ color: "var(--text-dim)" }}
+        >
+          <Cpu size={11} /> Provider Usage
+        </h3>
+
+        {providerUsage ? (
+          <div
+            className="rounded-xl p-3 space-y-2"
+            style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+          >
+            <MetricRow label="Prompt tokens" value={providerUsage.prompt_tokens.toLocaleString()} />
+            <MetricRow label="Completion tokens" value={providerUsage.completion_tokens.toLocaleString()} />
+            <MetricRow label="Total tokens" value={providerUsage.total_tokens.toLocaleString()} />
+          </div>
+        ) : (
+          <EmptyHint text="Real provider token usage appears when the upstream model returns usage metadata." />
+        )}
+      </section>
+
       <section className="p-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
         <h3
           className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
@@ -108,7 +140,6 @@ export function Sidebar() {
         )}
       </section>
 
-      {/* Tools */}
       <section className="p-4" style={{ borderBottom: "1px solid var(--border-subtle)" }}>
         <h3
           className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
@@ -119,30 +150,35 @@ export function Sidebar() {
             className="ml-auto px-1.5 py-0.5 rounded-full text-[10px] font-medium"
             style={{ background: "var(--bg-elevated)", color: "var(--text-dim)" }}
           >
-            {tools.length}
+            {enabledTools.length}/{tools.length}
           </span>
         </h3>
-        <div className="space-y-0.5 max-h-44 overflow-y-auto">
-          {tools.map((t) => (
+        <div className="space-y-1 max-h-44 overflow-y-auto">
+          {tools.map((tool) => (
             <div
-              key={t.name}
-              className="text-[11px] py-1 px-2.5 rounded-md truncate transition-colors cursor-default"
-              style={{ color: "var(--text-secondary)" }}
-              title={t.description}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
+              key={tool.name}
+              className="flex items-center justify-between gap-2 text-[11px] py-1.5 px-2.5 rounded-md"
+              style={{
+                color: tool.enabled === false ? "var(--text-dim)" : "var(--text-secondary)",
+                background: tool.enabled === false ? "transparent" : "var(--bg-surface)",
               }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-              }}
+              title={tool.description}
             >
-              {t.name}
+              <span className="truncate">{tool.name}</span>
+              <span
+                className="text-[9px] px-1.5 py-0.5 rounded-full uppercase tracking-wider"
+                style={{
+                  background: tool.enabled === false ? "var(--bg-hover)" : "rgba(122, 162, 247, 0.12)",
+                  color: tool.enabled === false ? "var(--text-dim)" : "var(--accent-blue)",
+                }}
+              >
+                {tool.enabled === false ? "off" : "on"}
+              </span>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Shortcuts */}
       <section className="p-4">
         <h3
           className="text-[11px] uppercase tracking-widest mb-3 flex items-center gap-1.5 font-medium"
@@ -172,5 +208,65 @@ export function Sidebar() {
         </div>
       </section>
     </aside>
+  );
+}
+
+function MetricRow({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-[11px]">
+      <span className="capitalize" style={{ color: "var(--text-dim)" }}>
+        {label}
+      </span>
+      <span
+        className="font-mono"
+        style={{ color: accent ?? "var(--text-secondary)" }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function MiniCard({
+  title,
+  value,
+  icon: Icon,
+}: {
+  title: string;
+  value: string;
+  icon: typeof Cpu;
+}) {
+  return (
+    <div
+      className="rounded-xl p-3"
+      style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+    >
+      <div className="flex items-center gap-2 mb-1.5" style={{ color: "var(--text-dim)" }}>
+        <Icon size={11} />
+        <span className="text-[10px] uppercase tracking-wider">{title}</span>
+      </div>
+      <div className="text-[12px] font-mono" style={{ color: "var(--text-secondary)" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function EmptyHint({ text }: { text: string }) {
+  return (
+    <div
+      className="rounded-xl p-3 text-[11px]"
+      style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", color: "var(--text-dim)" }}
+    >
+      {text}
+    </div>
   );
 }

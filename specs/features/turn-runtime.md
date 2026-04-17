@@ -2,7 +2,7 @@
 title: Turn Runtime
 status: active
 owner: Haojun
-last_updated: 2026-04-16
+last_updated: 2026-04-17
 source_paths:
   - src/superhaojun/agent.py
   - src/superhaojun/turn_runtime.py
@@ -68,13 +68,21 @@ source_paths:
   - buffered tool calls
   - explicit tool queue status entries
   - transcript-level message and token counters
+  - prompt-context metrics derived from the actual assembled request
+  - provider-usage metadata returned by the upstream model API
   - current-turn text and reasoning token estimates
   - compaction counters and last-compaction metadata
   - active memory-entry metadata for the current prompt build
   - active and timing state
+- `TurnRuntimeState` is also the right boundary for user-visible usage accounting:
+  - transcript-level rough estimates may stay here as internal runtime counters
+  - real provider usage, when returned by the model API, should also be stored here instead of being dropped before the WebUI sees it
+  - prompt/context accounting derived from the actual assembled request should be exposed alongside transcript counters so users can see what the harness truly sent
 - `Agent` now updates `turn_runtime` as each LLM turn progresses:
   - `start_turn()` at the top of each looped API call
+  - prompt-context metric snapshotting during `_build_messages()` before the request leaves the process
   - incremental text and reasoning chunk recording during stream processing
+  - provider-usage capture from streaming chunk metadata when the upstream SDK supplies usage counts
   - buffered tool-call snapshot updates while tool call fragments accumulate
   - transcript-level metric refresh after user, assistant, tool, and hook-context messages
   - `tool_execution` phase when a turn ends in tool calls
@@ -101,10 +109,12 @@ source_paths:
   - WebUI also forwards `runtime_state` snapshots alongside the existing raw event stream
   - model changes are broadcast explicitly
   - interrupt exists as a message type but is not wired end to end
-- This means users can now inspect queue and counter state without inferring it only from text deltas or WebUI-specific helper math, but the runtime boundary is still incomplete:
-  - interruption state is still not wired end to end
+- This means users can now inspect queue and counter state without inferring it only from text deltas or WebUI-specific helper math, and recent optimization work tightened the contract further:
+  - prompt/context contribution accounting is now surfaced as first-class runtime data
+  - provider usage is now preserved when the upstream API supplies real counts
+  - prompt-context metrics remain visible even if the later provider call fails
+  - interruption state is still not wired as a richer resumable state machine
   - queue state is explicit during execution, but not yet modeled as a richer long-lived batch object
-  - token accounting is still approximate rather than provider-accurate
 - The active optimization direction remains to borrow the `QueryConfig / state snapshot` idea from Claude Code in a lighter Python form, so immutable turn config and mutable turn state stop being mixed together.
 - This feature is also the main place where `Explainability First` becomes concrete. Runtime state should be exposed because it helps users understand what the harness is doing, not merely because it helps debugging.
 
@@ -120,6 +130,9 @@ source_paths:
 - When changing this feature later, confirm that:
   - visible turn sequencing remains stable
   - runtime counters shown to users still correspond to real internal state
+  - provider usage does not regress to rough estimates when the upstream API supplied real counts
+  - prompt/context counters correspond to the actual assembled request, not UI-side approximations
+  - prompt/context counters are still available on provider-side failures
   - interrupt and future resume work do not require re-hiding state that was previously visible
 
 ## Follow-ups

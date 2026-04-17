@@ -30,15 +30,18 @@ cp .env.example .env
 Edit `models.yaml` to define your LLM endpoints:
 
 ```yaml
-default: openrouter
+default: gpt-oss-120b-free
+
+providers:
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1"
+    api_key: "${OPENROUTER_API_KEY}"
 
 models:
-  openrouter:
-    name: "Step 3.5 Flash"
-    model_id: "stepfun/step-3.5-flash:free"
-    base_url: "https://openrouter.ai/api/v1"
-    api_key: "${OPENAI_API_KEY}"   # reads from .env
-    provider: "openai"
+  gpt-oss-120b-free:
+    name: "OpenAI: gpt-oss-120b (free)"
+    model_id: "openai/gpt-oss-120b:free"
+    provider: openrouter
 ```
 
 Add multiple profiles to switch between models in the app.
