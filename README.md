@@ -99,6 +99,16 @@ cd webui
 npm run build
 ```
 
+Deployment guide:
+
+- [阿里云部署指南（独立部署 SuperHaojun）](docs/deploying-on-alicloud.md)
+
+如果你是把 `SuperHaojun` 作为 `personal-web` 的子模块一起上线：
+
+- 不要直接部署这个仓库
+- 应该部署 `personal-web`
+- 由 `personal-web/apps/superhaojun` 引用这里的代码
+
 ---
 
 ## Configuration
